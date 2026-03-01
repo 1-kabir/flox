@@ -41,6 +41,7 @@ static BROWSER_SESSIONS: Lazy<Arc<Mutex<HashMap<String, BrowserSession>>>> =
 struct BrowserSession {
     pub process: Option<Child>,
     pub cdp_url: String,
+    #[allow(dead_code)]
     pub debug_port: u16,
 }
 
@@ -323,8 +324,6 @@ pub async fn execute_action(
 
 async fn execute_cdp_action(ws_url: &str, action: &BrowserAction) -> Result<ActionResult, String> {
     use tokio_tungstenite::connect_async;
-    use tokio_tungstenite::tungstenite::Message;
-    use futures_util::{SinkExt, StreamExt};
 
     let (mut ws, _) = connect_async(ws_url)
         .await

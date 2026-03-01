@@ -3,7 +3,6 @@ mod automation;
 mod settings;
 mod agents;
 
-use tauri::Manager;
 use tauri_plugin_store::StoreExt;
 
 pub fn run() {

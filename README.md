@@ -1,73 +1,117 @@
-# React + TypeScript + Vite
+# Flox - AI Browser Automation
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+> The most powerful and configurable desktop-based browser AI automation tool.
 
-Currently, two official plugins are available:
+Flox is a cross-platform, open-source desktop application built with **Tauri** (Rust) and **React/TypeScript** that lets you automate browser tasks using AI. Configure your own LLM keys (BYOK) and models (BYOM), chat with the AI to run browser tasks, or schedule recurring automations that run in the background.
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+---
 
-## React Compiler
+## ✨ Features
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+### 🤖 Three-Agent AI System
+- **Planner Agent** — Breaks down your goal into a step-by-step browser automation plan
+- **Navigator Agent** — Executes actions in the browser (click, type, scroll, navigate, etc.) with optional screenshot vision
+- **Verifier Agent** — Validates each action for safety and correctness before execution
 
-## Expanding the ESLint configuration
+### 🌐 Browser Detection & Management
+- Automatically detects installed Chromium-based browsers: **Google Chrome**, **Microsoft Edge**, **Brave**, **Vivaldi**, **Chromium**
+- Select which browser to use per task
+- Optional **headless mode** for background execution
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+### 🛠️ Browser Automation Tools (via CDP)
+- Navigate to URLs
+- Click elements by CSS selector or coordinates
+- Type text into inputs
+- Scroll pages
+- Press keyboard keys
+- Execute JavaScript
+- Capture screenshots
 
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
+### 🔑 Bring Your Own Keys & Models (BYOK/BYOM)
+- **OpenAI** (GPT-4o, GPT-4o mini, etc.)
+- **Anthropic** (Claude 3.5 Sonnet, etc.)
+- **Groq** (Llama, Mixtral)
+- **Ollama** (local models)
+- **Any OpenAI-compatible API** (custom base URL)
+- Configure separate models for each agent
 
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
+### ⏰ Scheduled Automations
+- Create named automations with custom prompts
+- Set custom intervals (minutes to hours)
+- Enable/disable automations independently
+- Run immediately or wait for schedule
+- App lives in the **system tray** and restarts automations on wake
 
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+### 🎨 Modern UI/UX
+- **Dark & Light mode** toggle
+- **Poppins** font
+- Rounded corners, minimalistic design
+- Conversation history sidebar
+- Real-time agent activity logs with screenshots
+
+---
+
+## 🚀 Getting Started
+
+### Prerequisites
+- [Node.js 18+](https://nodejs.org/)
+- [Rust 1.70+](https://rustup.rs/)
+- A Chromium-based browser installed
+
+### Development
+
+```bash
+# Install frontend dependencies
+npm install
+
+# Run in development mode
+npm run tauri dev
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+### Build
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
-
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```bash
+# Build for production
+npm run tauri build
 ```
+
+---
+
+## ⚙️ Configuration
+
+Open **Settings** in the app to configure:
+
+1. **Browser** — Auto-detect installed browsers, select preferred browser
+2. **Planner Agent** — Model for high-level planning (recommended: GPT-4o or Claude 3.5 Sonnet)
+3. **Navigator Agent** — Model for browser navigation, needs vision support (recommended: GPT-4o)
+4. **Verifier Agent** — Model for action validation (recommended: GPT-4o mini)
+5. **Behavior** — Max steps, timeout, screenshot mode
+
+---
+
+## 🏗️ Architecture
+
+```
+flox/
+├── src/                    # React/TypeScript frontend
+│   ├── components/
+│   │   ├── chat/           # Chat interface, browser selector, agent status
+│   │   ├── settings/       # Model config, browser settings
+│   │   ├── automations/    # Scheduled automation management
+│   │   ├── logs/           # Real-time activity logs
+│   │   └── ui/             # Reusable UI components
+│   ├── store.ts            # Zustand state management
+│   └── types.ts            # TypeScript type definitions
+└── src-tauri/              # Rust/Tauri backend
+    └── src/
+        ├── browser.rs      # Browser detection + CDP automation
+        ├── agents.rs       # Three-agent LLM orchestration
+        ├── automation.rs   # Scheduled automation engine
+        └── settings.rs     # Persistent settings store
+```
+
+---
+
+## 📝 License
+
+MIT License — see [LICENSE](LICENSE)

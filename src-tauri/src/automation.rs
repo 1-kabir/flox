@@ -1,5 +1,4 @@
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use tauri::Emitter;
 use tauri_plugin_store::StoreExt;
 use uuid::Uuid;
