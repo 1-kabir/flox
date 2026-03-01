@@ -1,0 +1,145 @@
+import { create } from 'zustand';
+import type { AppSettings, BrowserInfo, Conversation, Message, Automation, AgentProgress } from './types';
+
+const defaultSettings: AppSettings = {
+  planner_model: {
+    provider: 'openai',
+    model: 'gpt-4o',
+    api_key: '',
+    temperature: 0.7,
+    max_tokens: 2048,
+  },
+  navigator_model: {
+    provider: 'openai',
+    model: 'gpt-4o',
+    api_key: '',
+    temperature: 0.3,
+    max_tokens: 1024,
+  },
+  verifier_model: {
+    provider: 'openai',
+    model: 'gpt-4o-mini',
+    api_key: '',
+    temperature: 0.1,
+    max_tokens: 512,
+  },
+  preferred_browser: undefined,
+  headless_mode: false,
+  theme: 'dark',
+  screenshots_enabled: true,
+  max_steps: 50,
+  timeout_seconds: 300,
+};
+
+interface AppState {
+  // Theme
+  theme: 'dark' | 'light';
+  toggleTheme: () => void;
+
+  // Navigation
+  activeTab: 'chat' | 'automations' | 'settings' | 'logs';
+  setActiveTab: (tab: 'chat' | 'automations' | 'settings' | 'logs') => void;
+
+  // Browsers
+  browsers: BrowserInfo[];
+  setBrowsers: (browsers: BrowserInfo[]) => void;
+  selectedBrowser: string | null;
+  setSelectedBrowser: (id: string | null) => void;
+
+  // Conversations
+  conversations: Conversation[];
+  activeConversationId: string | null;
+  setConversations: (convs: Conversation[]) => void;
+  addConversation: (conv: Conversation) => void;
+  updateConversation: (id: string, updates: Partial<Conversation>) => void;
+  setActiveConversation: (id: string | null) => void;
+  addMessage: (conversationId: string, message: Message) => void;
+
+  // Settings
+  settings: AppSettings;
+  setSettings: (settings: AppSettings) => void;
+
+  // Automations
+  automations: Automation[];
+  setAutomations: (automations: Automation[]) => void;
+  addAutomation: (automation: Automation) => void;
+  updateAutomation: (id: string, updates: Partial<Automation>) => void;
+  removeAutomation: (id: string) => void;
+
+  // Agent state
+  isAgentRunning: boolean;
+  setIsAgentRunning: (running: boolean) => void;
+  agentProgress: AgentProgress[];
+  addAgentProgress: (progress: AgentProgress) => void;
+  clearAgentProgress: () => void;
+  currentTaskId: string | null;
+  setCurrentTaskId: (id: string | null) => void;
+  currentScreenshot: string | null;
+  setCurrentScreenshot: (screenshot: string | null) => void;
+}
+
+export const useAppStore = create<AppState>((set) => ({
+  theme: 'dark',
+  toggleTheme: () =>
+    set((state) => ({ theme: state.theme === 'dark' ? 'light' : 'dark' })),
+
+  activeTab: 'chat',
+  setActiveTab: (tab) => set({ activeTab: tab }),
+
+  browsers: [],
+  setBrowsers: (browsers) => set({ browsers }),
+  selectedBrowser: null,
+  setSelectedBrowser: (id) => set({ selectedBrowser: id }),
+
+  conversations: [],
+  activeConversationId: null,
+  setConversations: (conversations) => set({ conversations }),
+  addConversation: (conv) =>
+    set((state) => ({ conversations: [conv, ...state.conversations] })),
+  updateConversation: (id, updates) =>
+    set((state) => ({
+      conversations: state.conversations.map((c) =>
+        c.id === id ? { ...c, ...updates } : c
+      ),
+    })),
+  setActiveConversation: (id) => set({ activeConversationId: id }),
+  addMessage: (conversationId, message) =>
+    set((state) => ({
+      conversations: state.conversations.map((c) =>
+        c.id === conversationId
+          ? { ...c, messages: [...c.messages, message] }
+          : c
+      ),
+    })),
+
+  settings: defaultSettings,
+  setSettings: (settings) => set({ settings }),
+
+  automations: [],
+  setAutomations: (automations) => set({ automations }),
+  addAutomation: (automation) =>
+    set((state) => ({ automations: [automation, ...state.automations] })),
+  updateAutomation: (id, updates) =>
+    set((state) => ({
+      automations: state.automations.map((a) =>
+        a.id === id ? { ...a, ...updates } : a
+      ),
+    })),
+  removeAutomation: (id) =>
+    set((state) => ({
+      automations: state.automations.filter((a) => a.id !== id),
+    })),
+
+  isAgentRunning: false,
+  setIsAgentRunning: (running) => set({ isAgentRunning: running }),
+  agentProgress: [],
+  addAgentProgress: (progress) =>
+    set((state) => ({
+      agentProgress: [...state.agentProgress.slice(-50), progress],
+    })),
+  clearAgentProgress: () => set({ agentProgress: [] }),
+  currentTaskId: null,
+  setCurrentTaskId: (id) => set({ currentTaskId: id }),
+  currentScreenshot: null,
+  setCurrentScreenshot: (screenshot) => set({ currentScreenshot: screenshot }),
+}));

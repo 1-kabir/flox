@@ -1,0 +1,110 @@
+import React, { useState } from 'react';
+import { Plus, MessageSquare, Trash2 } from 'lucide-react';
+import { useAppStore } from '../../store';
+import { cn, generateId, formatRelativeTime, truncate } from '../../lib/utils';
+import type { Conversation } from '../../types';
+
+export const ChatSidebar: React.FC = () => {
+  const {
+    conversations,
+    activeConversationId,
+    setActiveConversation,
+    addConversation,
+    setConversations,
+  } = useAppStore();
+
+  const createNewConversation = () => {
+    const conv: Conversation = {
+      id: generateId(),
+      title: 'New Conversation',
+      messages: [],
+      created_at: new Date().toISOString(),
+    };
+    addConversation(conv);
+    setActiveConversation(conv.id);
+  };
+
+  const deleteConversation = (e: React.MouseEvent, id: string) => {
+    e.stopPropagation();
+    const { conversations: convs, activeConversationId: activeId, setActiveConversation: setActive } = useAppStore.getState();
+    const filtered = convs.filter((c) => c.id !== id);
+    setConversations(filtered);
+    if (activeId === id) {
+      setActive(filtered[0]?.id ?? null);
+    }
+  };
+
+  return (
+    <div className="w-64 flex flex-col border-r border-gray-800 bg-gray-950">
+      <div className="p-4 flex items-center justify-between border-b border-gray-800">
+        <h2 className="text-sm font-semibold text-gray-200">Conversations</h2>
+        <button
+          onClick={createNewConversation}
+          className="w-8 h-8 flex items-center justify-center rounded-lg bg-violet-600 hover:bg-violet-700 text-white transition-colors"
+        >
+          <Plus className="w-4 h-4" />
+        </button>
+      </div>
+
+      <div className="flex-1 overflow-y-auto p-2 space-y-1">
+        {conversations.length === 0 && (
+          <div className="text-center text-gray-600 text-sm py-8">
+            <MessageSquare className="w-8 h-8 mx-auto mb-2 opacity-50" />
+            <p>No conversations yet</p>
+            <p className="text-xs mt-1">Click + to start</p>
+          </div>
+        )}
+        {conversations.map((conv) => (
+          <ConversationItem
+            key={conv.id}
+            conversation={conv}
+            isActive={activeConversationId === conv.id}
+            onClick={() => setActiveConversation(conv.id)}
+            onDelete={(e) => deleteConversation(e, conv.id)}
+          />
+        ))}
+      </div>
+    </div>
+  );
+};
+
+const ConversationItem: React.FC<{
+  conversation: Conversation;
+  isActive: boolean;
+  onClick: () => void;
+  onDelete: (e: React.MouseEvent) => void;
+}> = ({ conversation, isActive, onClick, onDelete }) => {
+  const [hovered, setHovered] = useState(false);
+
+  return (
+    <div
+      className={cn(
+        'group relative flex items-center gap-3 px-3 py-2.5 rounded-xl cursor-pointer transition-all duration-200',
+        isActive
+          ? 'bg-violet-600/20 text-violet-300'
+          : 'text-gray-400 hover:bg-gray-800 hover:text-gray-200'
+      )}
+      onClick={onClick}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+    >
+      <MessageSquare className="w-4 h-4 shrink-0" />
+      <div className="flex-1 min-w-0">
+        <p className="text-sm font-medium truncate">
+          {truncate(conversation.title, 24)}
+        </p>
+        <p className="text-xs text-gray-600 truncate">
+          {formatRelativeTime(conversation.created_at)}
+        </p>
+      </div>
+      {hovered && (
+        <button
+          onClick={onDelete}
+          className="w-6 h-6 flex items-center justify-center rounded-lg hover:bg-red-500/20 hover:text-red-400 text-gray-600 transition-colors"
+        >
+          <Trash2 className="w-3 h-3" />
+        </button>
+      )}
+    </div>
+  );
+};
