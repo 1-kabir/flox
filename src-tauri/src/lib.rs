@@ -2,6 +2,7 @@ mod browser;
 mod automation;
 mod settings;
 mod agents;
+mod skills;
 
 use tauri_plugin_store::StoreExt;
 
@@ -30,6 +31,7 @@ pub fn run() {
             browser::execute_action,
             agents::run_agent_task,
             agents::stop_agent_task,
+            agents::resolve_approval,
             settings::get_settings,
             settings::save_settings,
             automation::get_automations,
@@ -37,6 +39,12 @@ pub fn run() {
             automation::delete_automation,
             automation::toggle_automation,
             automation::run_automation_now,
+            automation::get_automation_logs,
+            automation::clear_automation_logs,
+            skills::get_skills,
+            skills::install_skill,
+            skills::uninstall_skill,
+            skills::toggle_skill,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -157,6 +157,24 @@ pub async fn run_automation_now(
     Ok(())
 }
 
+#[tauri::command]
+pub async fn get_automation_logs(app: tauri::AppHandle) -> Result<Vec<AutomationLog>, String> {
+    let store = app.store("flox_store.bin").map_err(|e| e.to_string())?;
+    let logs: Vec<AutomationLog> = store
+        .get("automation_logs")
+        .and_then(|v| serde_json::from_value(v).ok())
+        .unwrap_or_default();
+    Ok(logs)
+}
+
+#[tauri::command]
+pub async fn clear_automation_logs(app: tauri::AppHandle) -> Result<(), String> {
+    let store = app.store("flox_store.bin").map_err(|e| e.to_string())?;
+    store.set("automation_logs", serde_json::json!([]));
+    store.save().map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 pub async fn start_automation_scheduler(app: tauri::AppHandle) {
     let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(60));
 
