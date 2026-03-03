@@ -102,3 +102,34 @@ export interface AgentProgress {
   screenshot?: string;
   timestamp: string;
 }
+
+// ---------------------------------------------------------------------------
+// Skills
+// ---------------------------------------------------------------------------
+export interface Skill {
+  id: string;
+  name: string;
+  author: string;
+  description: string;
+  version: string;
+  triggers_domains: string[];
+  triggers_keywords: string[];
+  planner_prompt?: string;
+  navigator_prompt?: string;
+  permissions: string[];
+  enabled: boolean;
+  installed_at: string;
+  source_url?: string;
+}
+
+// ---------------------------------------------------------------------------
+// Human-in-the-loop approvals
+// ---------------------------------------------------------------------------
+export interface ApprovalRequest {
+  approval_id: string;
+  task_id: string;
+  action: BrowserAction;
+  reason: string;
+  timestamp: string;
+}
+

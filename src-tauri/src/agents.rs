@@ -7,6 +7,88 @@ use tauri::Emitter;
 use crate::settings::{AppSettings, ModelConfig};
 use crate::browser::{BrowserAction, ActionResult};
 
+// ---------------------------------------------------------------------------
+// Human-in-the-loop approval plumbing
+// ---------------------------------------------------------------------------
+
+/// Pending approval channels, keyed by approval_id.
+static PENDING_APPROVALS: Lazy<Arc<Mutex<HashMap<String, tokio::sync::oneshot::Sender<bool>>>>> =
+    Lazy::new(|| Arc::new(Mutex::new(HashMap::new())));
+
+/// Frontend calls this to approve or reject a pending action.
+#[tauri::command]
+pub async fn resolve_approval(approval_id: String, approved: bool) -> Result<(), String> {
+    let tx = {
+        let mut map = PENDING_APPROVALS.lock().unwrap();
+        map.remove(&approval_id)
+    };
+    if let Some(tx) = tx {
+        let _ = tx.send(approved);
+    }
+    Ok(())
+}
+
+/// Request human approval for a proposed action. Returns `true` if approved.
+async fn request_human_approval(
+    app: &tauri::AppHandle,
+    action: &BrowserAction,
+    reason: &str,
+    task_id: &str,
+) -> bool {
+    let (tx, rx) = tokio::sync::oneshot::channel::<bool>();
+    let approval_id = uuid::Uuid::new_v4().to_string();
+
+    {
+        let mut map = PENDING_APPROVALS.lock().unwrap();
+        map.insert(approval_id.clone(), tx);
+    }
+
+    let _ = app.emit("approval_required", serde_json::json!({
+        "approval_id": approval_id,
+        "task_id": task_id,
+        "action": action,
+        "reason": reason,
+        "timestamp": chrono::Utc::now().to_rfc3339()
+    }));
+
+    // Wait up to 120 s for user decision; default to approved = false on timeout.
+    tokio::time::timeout(
+        tokio::time::Duration::from_secs(120),
+        rx,
+    )
+    .await
+    .unwrap_or(Ok(false))
+    .unwrap_or(false)
+}
+
+/// Returns `true` when an action is considered risky and should require human approval.
+fn is_risky_action(action: &BrowserAction) -> bool {
+    match action.action_type.as_str() {
+        "navigate" => {
+            // External payment or account-management pages are risky.
+            let risky_patterns = ["checkout", "payment", "pay", "billing", "account/delete", "confirm", "submit"];
+            action.url.as_deref().map(|u| {
+                let l = u.to_lowercase();
+                risky_patterns.iter().any(|p| l.contains(p))
+            }).unwrap_or(false)
+        }
+        "click" => {
+            let risky_patterns = ["submit", "buy", "purchase", "checkout", "confirm", "delete", "remove", "pay"];
+            let target = action.selector.as_deref().unwrap_or("").to_lowercase();
+            risky_patterns.iter().any(|p| target.contains(p))
+        }
+        "evaluate" => {
+            // Arbitrary JS is inherently risky.
+            true
+        }
+        _ => false,
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Agent data structures
+// ---------------------------------------------------------------------------
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Message {
     pub role: String,
@@ -56,10 +138,14 @@ pub async fn run_agent_task(
         steps: Vec::new(),
     };
 
+    // Load skill prompt injections
+    let (skill_planner_prompt, skill_navigator_prompt) =
+        crate::skills::get_relevant_skill_prompts(&app, &objective, None).await;
+
     // PLANNING PHASE
     emit_progress(&app, &task_id, "planner", "Planning the task...", None);
 
-    let plan = call_planner(&settings.planner_model, &objective, &[]).await
+    let plan = call_planner(&settings.planner_model, &objective, &[], skill_planner_prompt.as_deref()).await
         .map_err(|e| format!("Planner error: {}", e))?;
 
     let plan_step = AgentStep {
@@ -75,8 +161,9 @@ pub async fn run_agent_task(
     emit_progress(&app, &task_id, "planner", &plan, None);
 
     // NAVIGATION PHASE
+    let navigator_system = format!("{}{}", get_navigator_system_prompt(), skill_navigator_prompt.as_deref().unwrap_or(""));
     let mut conversation_history: Vec<Message> = vec![
-        Message { role: "system".to_string(), content: get_navigator_system_prompt() },
+        Message { role: "system".to_string(), content: navigator_system },
         Message { role: "user".to_string(), content: format!("Objective: {}\n\nPlan:\n{}", objective, plan) },
     ];
 
@@ -122,7 +209,7 @@ pub async fn run_agent_task(
                 }
 
                 if let Some(action) = maybe_action {
-                    // VERIFICATION PHASE
+                    // VERIFICATION PHASE (LLM verifier)
                     let verification = call_verifier(
                         &settings.verifier_model,
                         &objective,
@@ -152,6 +239,25 @@ pub async fn run_agent_task(
                             content: format!("Action was rejected by verifier: {}. Please choose a different action.", reason),
                         });
                         continue;
+                    }
+
+                    // HUMAN-IN-THE-LOOP: require approval for risky actions
+                    if is_risky_action(&action) {
+                        let reason = format!("Risky action proposed: {:?}. Thought: {}", action.action_type, thought);
+                        emit_progress(&app, &task_id, "verifier", "⏳ Awaiting human approval for risky action...", None);
+                        let human_approved = request_human_approval(&app, &action, &reason, &task_id).await;
+                        if !human_approved {
+                            conversation_history.push(Message {
+                                role: "assistant".to_string(),
+                                content: thought.clone(),
+                            });
+                            conversation_history.push(Message {
+                                role: "user".to_string(),
+                                content: "Action was rejected by the user. Please choose a safer alternative.".to_string(),
+                            });
+                            continue;
+                        }
+                        emit_progress(&app, &task_id, "verifier", "✅ Human approved the action.", None);
                     }
 
                     // Execute action
@@ -247,12 +353,16 @@ fn emit_progress(
     }));
 }
 
-async fn call_planner(model: &ModelConfig, objective: &str, _context: &[Message]) -> Result<String, anyhow::Error> {
-    let system_prompt = r#"You are an expert web automation planner. Your job is to break down a user's objective into a clear, step-by-step plan for browser automation.
+async fn call_planner(model: &ModelConfig, objective: &str, _context: &[Message], skill_prompt: Option<&str>) -> Result<String, anyhow::Error> {
+    let mut system_prompt = r#"You are an expert web automation planner. Your job is to break down a user's objective into a clear, step-by-step plan for browser automation.
 
 Analyze the objective and create a concise plan with numbered steps. Each step should be specific and actionable (navigate to URL, click button, fill form, etc.).
 
-Keep the plan focused and efficient. Don't over-engineer it."#;
+Keep the plan focused and efficient. Don't over-engineer it."#.to_string();
+
+    if let Some(extra) = skill_prompt {
+        system_prompt.push_str(extra);
+    }
 
     let messages = vec![
         serde_json::json!({"role": "system", "content": system_prompt}),

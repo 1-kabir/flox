@@ -7,6 +7,7 @@ import {
   Zap,
   Sun,
   Moon,
+  Puzzle,
 } from 'lucide-react';
 import { useAppStore } from '../store';
 import { cn } from '../lib/utils';
@@ -14,6 +15,7 @@ import { cn } from '../lib/utils';
 const navItems = [
   { id: 'chat', icon: MessageSquare, label: 'Chat' },
   { id: 'automations', icon: Calendar, label: 'Automations' },
+  { id: 'skills', icon: Puzzle, label: 'Skills' },
   { id: 'logs', icon: ScrollText, label: 'Logs' },
   { id: 'settings', icon: Settings, label: 'Settings' },
 ] as const;

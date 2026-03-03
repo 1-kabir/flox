@@ -7,8 +7,10 @@ import { ChatView } from './components/chat/ChatView';
 import { SettingsView } from './components/settings/SettingsView';
 import { AutomationsView } from './components/automations/AutomationsView';
 import { LogsView } from './components/logs/LogsView';
+import { SkillsView } from './components/skills/SkillsView';
+import { ApprovalModal } from './components/chat/ApprovalModal';
 import { cn } from './lib/utils';
-import type { AppSettings, BrowserInfo, Automation } from './types';
+import type { AppSettings, BrowserInfo, Automation, ApprovalRequest } from './types';
 
 export default function App() {
   const {
@@ -18,6 +20,7 @@ export default function App() {
     setBrowsers,
     setAutomations,
     updateAutomation,
+    addApproval,
   } = useAppStore();
 
   // Load settings and data on mount
@@ -42,7 +45,7 @@ export default function App() {
     init();
   }, [setSettings, setBrowsers, setAutomations]);
 
-  // Listen for automation events
+  // Listen for automation completion events
   useEffect(() => {
     const unlistenCompleted = listen('automation_completed', (event) => {
       const payload = event.payload as {
@@ -61,6 +64,16 @@ export default function App() {
     };
   }, [updateAutomation]);
 
+  // Listen for human-in-the-loop approval requests
+  useEffect(() => {
+    const unlisten = listen<ApprovalRequest>('approval_required', (event) => {
+      addApproval(event.payload);
+    });
+    return () => {
+      unlisten.then((fn) => fn());
+    };
+  }, [addApproval]);
+
   const isDark = theme === 'dark';
 
   return (
@@ -76,7 +89,12 @@ export default function App() {
         {activeTab === 'settings' && <SettingsView />}
         {activeTab === 'automations' && <AutomationsView />}
         {activeTab === 'logs' && <LogsView />}
+        {activeTab === 'skills' && <SkillsView />}
       </main>
+
+      {/* Human-in-the-loop approval modal — rendered above everything */}
+      <ApprovalModal />
     </div>
   );
 }
+

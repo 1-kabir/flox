@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { AppSettings, BrowserInfo, Conversation, Message, Automation, AgentProgress } from './types';
+import type { AppSettings, BrowserInfo, Conversation, Message, Automation, AgentProgress, Skill, ApprovalRequest } from './types';
 
 const defaultSettings: AppSettings = {
   planner_model: {
@@ -37,8 +37,8 @@ interface AppState {
   toggleTheme: () => void;
 
   // Navigation
-  activeTab: 'chat' | 'automations' | 'settings' | 'logs';
-  setActiveTab: (tab: 'chat' | 'automations' | 'settings' | 'logs') => void;
+  activeTab: 'chat' | 'automations' | 'settings' | 'logs' | 'skills';
+  setActiveTab: (tab: 'chat' | 'automations' | 'settings' | 'logs' | 'skills') => void;
 
   // Browsers
   browsers: BrowserInfo[];
@@ -76,6 +76,18 @@ interface AppState {
   setCurrentTaskId: (id: string | null) => void;
   currentScreenshot: string | null;
   setCurrentScreenshot: (screenshot: string | null) => void;
+
+  // Skills
+  skills: Skill[];
+  setSkills: (skills: Skill[]) => void;
+  addSkill: (skill: Skill) => void;
+  updateSkill: (id: string, updates: Partial<Skill>) => void;
+  removeSkill: (id: string) => void;
+
+  // Pending human-in-the-loop approvals
+  pendingApprovals: ApprovalRequest[];
+  addApproval: (req: ApprovalRequest) => void;
+  removeApproval: (approvalId: string) => void;
 }
 
 export const useAppStore = create<AppState>((set) => ({
@@ -142,4 +154,24 @@ export const useAppStore = create<AppState>((set) => ({
   setCurrentTaskId: (id) => set({ currentTaskId: id }),
   currentScreenshot: null,
   setCurrentScreenshot: (screenshot) => set({ currentScreenshot: screenshot }),
+
+  skills: [],
+  setSkills: (skills) => set({ skills }),
+  addSkill: (skill) =>
+    set((state) => ({ skills: [skill, ...state.skills] })),
+  updateSkill: (id, updates) =>
+    set((state) => ({
+      skills: state.skills.map((s) => (s.id === id ? { ...s, ...updates } : s)),
+    })),
+  removeSkill: (id) =>
+    set((state) => ({ skills: state.skills.filter((s) => s.id !== id) })),
+
+  pendingApprovals: [],
+  addApproval: (req) =>
+    set((state) => ({ pendingApprovals: [...state.pendingApprovals, req] })),
+  removeApproval: (approvalId) =>
+    set((state) => ({
+      pendingApprovals: state.pendingApprovals.filter((a) => a.approval_id !== approvalId),
+    })),
 }));
+
