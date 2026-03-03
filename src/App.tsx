@@ -6,7 +6,7 @@ import { Sidebar } from './components/Sidebar';
 import { ChatView } from './components/chat/ChatView';
 import { SettingsView } from './components/settings/SettingsView';
 import { AutomationsView } from './components/automations/AutomationsView';
-import { LogsView } from './components/logs/LogsView';
+import { LogsView } from './components/activity/LogsView';
 import { SkillsView } from './components/skills/SkillsView';
 import { ApprovalModal } from './components/chat/ApprovalModal';
 import { cn } from './lib/utils';

@@ -51,7 +51,7 @@ async fn request_human_approval(
         "timestamp": chrono::Utc::now().to_rfc3339()
     }));
 
-    // Wait up to 120 s for user decision; default to approved = false on timeout.
+    // Wait up to 120 seconds for user decision; default to approved = false on timeout.
     tokio::time::timeout(
         tokio::time::Duration::from_secs(120),
         rx,
@@ -161,7 +161,11 @@ pub async fn run_agent_task(
     emit_progress(&app, &task_id, "planner", &plan, None);
 
     // NAVIGATION PHASE
-    let navigator_system = format!("{}{}", get_navigator_system_prompt(), skill_navigator_prompt.as_deref().unwrap_or(""));
+    let navigator_system = if let Some(extra) = skill_navigator_prompt.as_deref() {
+        format!("{}\n{}", get_navigator_system_prompt(), extra)
+    } else {
+        get_navigator_system_prompt()
+    };
     let mut conversation_history: Vec<Message> = vec![
         Message { role: "system".to_string(), content: navigator_system },
         Message { role: "user".to_string(), content: format!("Objective: {}\n\nPlan:\n{}", objective, plan) },
@@ -243,7 +247,7 @@ pub async fn run_agent_task(
 
                     // HUMAN-IN-THE-LOOP: require approval for risky actions
                     if is_risky_action(&action) {
-                        let reason = format!("Risky action proposed: {:?}. Thought: {}", action.action_type, thought);
+                        let reason = format!("Risky action proposed: {}. Thought: {}", action.action_type, thought);
                         emit_progress(&app, &task_id, "verifier", "⏳ Awaiting human approval for risky action...", None);
                         let human_approved = request_human_approval(&app, &action, &reason, &task_id).await;
                         if !human_approved {

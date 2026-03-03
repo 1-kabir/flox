@@ -69,6 +69,10 @@ pub async fn install_skill(
     req: InstallSkillRequest,
 ) -> Result<Skill, String> {
     let mut skill = if let Some(url) = &req.url {
+        // Only allow http/https URLs to prevent file:// or other scheme abuse.
+        if !url.starts_with("https://") && !url.starts_with("http://") {
+            return Err("Only http/https URLs are allowed for skill installation".to_string());
+        }
         // Fetch skill manifest from URL
         let client = reqwest::Client::new();
         let text = client
