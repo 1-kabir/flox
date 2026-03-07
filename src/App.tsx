@@ -10,9 +10,9 @@ import { LogsView } from './components/activity/LogsView';
 import { SkillsView } from './components/skills/SkillsView';
 import { ApprovalModal } from './components/chat/ApprovalModal';
 import { cn } from './lib/utils';
-import type { AppSettings, BrowserInfo, Automation, ApprovalRequest } from './types';
+import type { AppSettings, BrowserInfo, Automation, ApprovalRequest, Skill, Message } from './types';
 
-// Conversation type returned by get_conversations (no messages yet)
+// Conversation record returned by get_conversations (no messages yet)
 interface ConversationRecord {
   id: string;
   title: string;
@@ -29,44 +29,56 @@ export default function App() {
     setBrowsers,
     setAutomations,
     setConversations,
+    setSkills,
     updateAutomation,
     addApproval,
     setIsOnline,
   } = useAppStore();
 
-  // Load settings, browsers, automations, and conversations on mount
+  // Load settings, browsers, automations, conversations (with messages), and skills on mount
   useEffect(() => {
     const init = async () => {
       try {
-        const [settings, browsers, automations, convRecords] = await Promise.all([
+        const [settings, browsers, automations, convRecords, skillsList] = await Promise.all([
           invoke<AppSettings>('get_settings'),
           invoke<BrowserInfo[]>('detect_browsers'),
           invoke<Automation[]>('get_automations'),
           invoke<ConversationRecord[]>('get_conversations'),
+          invoke<Skill[]>('get_skills'),
         ]);
 
         setSettings(settings);
         setBrowsers(browsers);
         setAutomations(automations);
+        setSkills(skillsList);
 
-        // Build Conversation objects with empty messages arrays.
-        // Individual message lists are loaded lazily per conversation.
-        setConversations(
-          convRecords.map((r) => ({
-            id: r.id,
-            title: r.title,
-            created_at: r.created_at,
-            session_id: r.session_id,
-            browser_path: r.browser_path,
-            messages: [],
-          }))
+        // Eagerly load messages for every conversation so the chat history is
+        // immediately available when the user opens a conversation.
+        // Use allSettled so a failure on one conversation doesn't prevent the
+        // rest from loading.
+        const messageResults = await Promise.allSettled(
+          convRecords.map((r) =>
+            invoke<Message[]>('get_messages', { conversationId: r.id })
+          )
         );
+        const conversationsWithMessages = convRecords.map((r, i) => ({
+          id: r.id,
+          title: r.title,
+          created_at: r.created_at,
+          session_id: r.session_id,
+          browser_path: r.browser_path,
+          messages:
+            messageResults[i].status === 'fulfilled'
+              ? (messageResults[i] as PromiseFulfilledResult<Message[]>).value
+              : [],
+        }));
+        setConversations(conversationsWithMessages);
       } catch (e) {
         console.error('Init error:', e);
       }
     };
     init();
-  }, [setSettings, setBrowsers, setAutomations, setConversations]);
+  }, [setSettings, setBrowsers, setAutomations, setConversations, setSkills]);
 
   // Poll network status every 10 seconds
   useEffect(() => {
