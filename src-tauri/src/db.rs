@@ -64,8 +64,8 @@ pub fn init(app_data_dir: PathBuf) -> SqlResult<()> {
         ",
     )?;
 
-    DB.set(Mutex::new(conn))
-        .map_err(|_| rusqlite::Error::InvalidQuery)?;
+    // Ignore if already initialised (e.g. hot-reload in dev).
+    let _ = DB.set(Mutex::new(conn));
 
     Ok(())
 }

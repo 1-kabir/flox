@@ -285,7 +285,7 @@ pub async fn run_agent_task(
 
         let nav_response = call_navigator(
             &settings.navigator_model,
-            &mut conversation_history,
+            &conversation_history,
             if settings.navigator_vision { screenshot.as_deref() } else { None },
             page_context.as_deref(),
         )
@@ -581,7 +581,7 @@ Keep the plan focused and efficient. Don't over-engineer it."#.to_string();
 
 async fn call_navigator(
     model: &ModelConfig,
-    history: &mut Vec<LlmMessage>,
+    history: &[LlmMessage],
     screenshot: Option<&str>,
     page_context: Option<&str>,
 ) -> Result<(String, Option<BrowserAction>, bool), anyhow::Error> {

@@ -4,6 +4,10 @@ use tokio::process::{Child, Command};
 use std::sync::{Arc, Mutex};
 use once_cell::sync::Lazy;
 
+type CdpStream = tokio_tungstenite::WebSocketStream<
+    tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+>;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BrowserInfo {
     pub id: String,
@@ -152,7 +156,7 @@ async fn get_browser_version(path: &str) -> Option<String> {
     let version_str = String::from_utf8_lossy(&output.stdout).to_string();
     let version = version_str
         .split_whitespace()
-        .find(|s| s.contains('.') && s.chars().next().map(|c| c.is_ascii_digit()).unwrap_or(false))
+        .find(|s| s.contains('.') && s.chars().next().map(char::is_ascii_digit).unwrap_or(false))
         .map(|s| s.to_string());
 
     version
@@ -273,7 +277,7 @@ async fn cdp_screenshot(ws_url: &str) -> Result<String, String> {
         }
     });
 
-    ws.send(Message::Text(msg.to_string().into()))
+    ws.send(Message::Text(msg.to_string()))
         .await
         .map_err(|e| e.to_string())?;
 
@@ -360,7 +364,7 @@ async fn execute_cdp_action(ws_url: &str, action: &BrowserAction) -> Result<Acti
                     .as_ref()
                     .and_then(|d| d["result"]["value"].as_array())
                     .map(|arr| (
-                        arr.get(0).and_then(|v| v.as_f64()).unwrap_or(0.0),
+                        arr.first().and_then(|v| v.as_f64()).unwrap_or(0.0),
                         arr.get(1).and_then(|v| v.as_f64()).unwrap_or(0.0),
                     ))
                     .unwrap_or((0.0, 0.0));
@@ -523,14 +527,14 @@ async fn execute_cdp_action(ws_url: &str, action: &BrowserAction) -> Result<Acti
 }
 
 async fn send_cdp_command(
-    ws: &mut tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>,
+    ws: &mut CdpStream,
     msg: &serde_json::Value,
     id: u32,
 ) -> Result<ActionResult, String> {
     use tokio_tungstenite::tungstenite::Message;
     use futures_util::{SinkExt, StreamExt};
 
-    ws.send(Message::Text(msg.to_string().into()))
+    ws.send(Message::Text(msg.to_string()))
         .await
         .map_err(|e| e.to_string())?;
 

@@ -271,7 +271,7 @@ fn is_skill_relevant(skill: &Skill, objective: &str, current_url: Option<&str>) 
 
     if let Some(url) = current_url {
         for domain in &skill.triggers_domains {
-            let pattern = domain.trim_start_matches("*.");
+            let pattern = domain.strip_prefix("*.").unwrap_or(domain);
             if url.contains(pattern) {
                 return true;
             }
