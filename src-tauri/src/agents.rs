@@ -12,7 +12,10 @@ use crate::network;
 // Human-in-the-loop approval plumbing
 // ---------------------------------------------------------------------------
 
-static PENDING_APPROVALS: Lazy<Arc<Mutex<HashMap<String, tokio::sync::oneshot::Sender<bool>>>>> =
+type ApprovalSender = tokio::sync::oneshot::Sender<bool>;
+type ApprovalMap = HashMap<String, ApprovalSender>;
+
+static PENDING_APPROVALS: Lazy<Arc<Mutex<ApprovalMap>>> =
     Lazy::new(|| Arc::new(Mutex::new(HashMap::new())));
 
 /// Frontend calls this to approve or reject a pending action.
@@ -709,7 +712,7 @@ async fn call_llm(
     model: &ModelConfig,
     messages: Vec<serde_json::Value>,
 ) -> Result<String, anyhow::Error> {
-    let base_url = model.base_url.as_deref().unwrap_or_else(|| {
+    let base_url = model.base_url.as_deref().unwrap_or(
         match model.provider.as_str() {
             "openai" => "https://api.openai.com/v1",
             "anthropic" => "https://api.anthropic.com/v1",
@@ -717,7 +720,7 @@ async fn call_llm(
             "ollama" => "http://localhost:11434/v1",
             _ => "https://api.openai.com/v1",
         }
-    });
+    );
 
     let client = reqwest::Client::new();
 
