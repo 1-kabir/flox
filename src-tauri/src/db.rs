@@ -64,8 +64,11 @@ pub fn init(app_data_dir: PathBuf) -> SqlResult<()> {
         ",
     )?;
 
-    // Ignore if already initialised (e.g. hot-reload in dev).
-    let _ = DB.set(Mutex::new(conn));
+    // Silently ignore if already initialised (e.g. hot-reload in dev).
+    // Intentionally not an error — the first call always wins.
+    if DB.set(Mutex::new(conn)).is_err() {
+        log::debug!("db::init called more than once; using existing connection");
+    }
 
     Ok(())
 }

@@ -6,6 +6,8 @@ import type { Skill } from '../../types';
 
 const PERMISSIONS = ['read_page', 'fill_forms', 'submit_forms', 'sensitive_data'] as const;
 
+const DEFAULT_AUTHOR = 'You';
+
 interface Props {
   initialSkill?: Skill | null;
   onSave: (skill: Skill) => Promise<void>;
@@ -16,7 +18,7 @@ export const CreateSkillModal: React.FC<Props> = ({ initialSkill, onSave, onClos
   const isEditing = !!initialSkill;
 
   const [name, setName] = useState(initialSkill?.name ?? '');
-  const [author, setAuthor] = useState(initialSkill?.author ?? 'You');
+  const [author, setAuthor] = useState(initialSkill?.author ?? DEFAULT_AUTHOR);
   const [description, setDescription] = useState(initialSkill?.description ?? '');
   const [version, setVersion] = useState(initialSkill?.version ?? '1.0.0');
   const [keywordInput, setKeywordInput] = useState('');
@@ -70,7 +72,7 @@ export const CreateSkillModal: React.FC<Props> = ({ initialSkill, onSave, onClos
       const skill: Skill = {
         id: initialSkill?.id ?? '',
         name: name.trim(),
-        author: author.trim() || 'You',
+        author: author.trim() || DEFAULT_AUTHOR,
         description: description.trim(),
         version: version.trim() || '1.0.0',
         triggers_keywords: keywords,

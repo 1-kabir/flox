@@ -5,7 +5,7 @@ use std::time::Duration;
 /// connection to `8.8.8.8:53` (Google DNS) with a short timeout.
 pub fn is_online() -> bool {
     TcpStream::connect_timeout(
-        &"8.8.8.8:53".parse().expect("static addr"),
+        &"8.8.8.8:53".parse().expect("hardcoded DNS address 8.8.8.8:53 must be valid"),
         Duration::from_secs(2),
     )
     .is_ok()

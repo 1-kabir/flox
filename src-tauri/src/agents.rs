@@ -338,12 +338,11 @@ pub async fn run_agent_task(
                         }
                     };
 
-                    // Require human approval when verifier rejects OR both risk_hint and
-                    // verifier flag the action.
-                    let needs_approval =
-                        !verified || (hint.is_some() && !verified);
-
-                    if needs_approval {
+                    // Require human approval when the verifier rejects the action.
+                    // Risk hints alone do NOT block (per spec: "Do not block on
+                    // is_risky_action alone"), but they are surfaced as additional
+                    // context in the approval request.
+                    if !verified {
                         let approval_reason = if verify_reason.is_empty() {
                             hint.clone().unwrap_or_else(|| {
                                 format!("Action flagged as potentially unsafe: {}", action.action_type)
@@ -376,19 +375,6 @@ pub async fn run_agent_task(
                             continue;
                         }
                         emit_progress(&app, &task_id, "verifier", "✅ Human approved.", None);
-                    } else if !verified {
-                        conversation_history.push(LlmMessage {
-                            role: "assistant".to_string(),
-                            content: thought.clone(),
-                        });
-                        conversation_history.push(LlmMessage {
-                            role: "user".to_string(),
-                            content: format!(
-                                "Action rejected by verifier: {}. Please choose a different action.",
-                                verify_reason
-                            ),
-                        });
-                        continue;
                     }
 
                     // Execute action
@@ -684,7 +670,7 @@ async fn call_llm_with_retry(
                     if attempt >= max_attempts {
                         return Err(e);
                     }
-                    let wait = (2u64.pow(attempt)).min(30);
+                    let wait = (2u64.pow(attempt)).min(MAX_BACKOFF_SECS);
                     tokio::time::sleep(tokio::time::Duration::from_secs(wait)).await;
                     continue;
                 } else if msg.contains("413") {
@@ -702,12 +688,17 @@ async fn call_llm_with_retry(
     }
 }
 
-/// Naively truncate message content to reduce payload size.
+/// Maximum exponential backoff wait before an LLM retry (seconds).
+const MAX_BACKOFF_SECS: u64 = 30;
+/// Maximum message content length before truncation on HTTP 413 retry.
+const MAX_MESSAGE_LENGTH: usize = 4000;
+
+/// Naively truncate message content to reduce payload size (used on HTTP 413 retry).
 fn truncate_messages(mut messages: Vec<serde_json::Value>) -> Vec<serde_json::Value> {
     for msg in &mut messages {
         if let Some(s) = msg["content"].as_str() {
-            if s.len() > 4000 {
-                msg["content"] = serde_json::json!(&s[..4000]);
+            if s.len() > MAX_MESSAGE_LENGTH {
+                msg["content"] = serde_json::json!(&s[..MAX_MESSAGE_LENGTH]);
             }
         }
     }
