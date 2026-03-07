@@ -27,6 +27,8 @@ const defaultSettings: AppSettings = {
   headless_mode: false,
   theme: 'dark',
   screenshots_enabled: true,
+  planner_vision: false,
+  navigator_vision: true,
   max_steps: 50,
   timeout_seconds: 300,
 };
@@ -52,6 +54,7 @@ interface AppState {
   setConversations: (convs: Conversation[]) => void;
   addConversation: (conv: Conversation) => void;
   updateConversation: (id: string, updates: Partial<Conversation>) => void;
+  deleteConversation: (id: string) => void;
   setActiveConversation: (id: string | null) => void;
   addMessage: (conversationId: string, message: Message) => void;
 
@@ -88,6 +91,10 @@ interface AppState {
   pendingApprovals: ApprovalRequest[];
   addApproval: (req: ApprovalRequest) => void;
   removeApproval: (approvalId: string) => void;
+
+  // Network status
+  isOnline: boolean;
+  setIsOnline: (online: boolean) => void;
 }
 
 export const useAppStore = create<AppState>((set) => ({
@@ -113,6 +120,12 @@ export const useAppStore = create<AppState>((set) => ({
       conversations: state.conversations.map((c) =>
         c.id === id ? { ...c, ...updates } : c
       ),
+    })),
+  deleteConversation: (id) =>
+    set((state) => ({
+      conversations: state.conversations.filter((c) => c.id !== id),
+      activeConversationId:
+        state.activeConversationId === id ? null : state.activeConversationId,
     })),
   setActiveConversation: (id) => set({ activeConversationId: id }),
   addMessage: (conversationId, message) =>
@@ -171,7 +184,11 @@ export const useAppStore = create<AppState>((set) => ({
     set((state) => ({ pendingApprovals: [...state.pendingApprovals, req] })),
   removeApproval: (approvalId) =>
     set((state) => ({
-      pendingApprovals: state.pendingApprovals.filter((a) => a.approval_id !== approvalId),
+      pendingApprovals: state.pendingApprovals.filter(
+        (a) => a.approval_id !== approvalId
+      ),
     })),
-}));
 
+  isOnline: true,
+  setIsOnline: (online) => set({ isOnline: online }),
+}));

@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { Send, Loader2, Globe, Monitor } from 'lucide-react';
+import { Send, Loader2, Globe, Monitor, Puzzle, X } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { useAppStore } from '../../store';
@@ -29,13 +29,17 @@ export const ChatView: React.FC = () => {
     clearAgentProgress,
     setCurrentTaskId,
     setCurrentScreenshot,
+    skills,
   } = useAppStore();
 
   const [input, setInput] = useState('');
   const [headless, setHeadless] = useState(false);
+  const [showSkillPicker, setShowSkillPicker] = useState(false);
+  const [selectedSkillIds, setSelectedSkillIds] = useState<string[]>([]);
   const agentProgressCount = useAppStore((s) => s.agentProgress.length);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const skillPickerRef = useRef<HTMLDivElement>(null);
 
   const activeConversation = conversations.find(
     (c) => c.id === activeConversationId
@@ -44,6 +48,20 @@ export const ChatView: React.FC = () => {
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [activeConversation?.messages]);
+
+  // Close skill picker on outside click
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (
+        skillPickerRef.current &&
+        !skillPickerRef.current.contains(e.target as Node)
+      ) {
+        setShowSkillPicker(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
 
   // Listen for agent progress events
   useEffect(() => {
@@ -61,6 +79,15 @@ export const ChatView: React.FC = () => {
           screenshot: progress.screenshot,
         };
         addMessage(activeConversationId, msg);
+        // Persist agent message immediately
+        invoke('save_message', {
+          message: {
+            ...msg,
+            conversation_id: activeConversationId,
+            agent: msg.agent ?? null,
+            screenshot: msg.screenshot ?? null,
+          },
+        }).catch(console.error);
       }
 
       if (progress.screenshot) {
@@ -73,6 +100,29 @@ export const ChatView: React.FC = () => {
     };
   }, [activeConversationId, addAgentProgress, addMessage, setCurrentScreenshot]);
 
+  const persistConversationAndMessage = useCallback(
+    async (convId: string, convData: { id: string; title: string; created_at: string }, msg: Message) => {
+      await invoke('save_conversation', {
+        conversation: {
+          id: convData.id,
+          title: convData.title,
+          created_at: convData.created_at,
+          session_id: null,
+          browser_path: null,
+        },
+      });
+      await invoke('save_message', {
+        message: {
+          ...msg,
+          conversation_id: convId,
+          agent: null,
+          screenshot: null,
+        },
+      });
+    },
+    []
+  );
+
   const handleSend = useCallback(async () => {
     if (!input.trim() || isAgentRunning) return;
 
@@ -81,6 +131,8 @@ export const ChatView: React.FC = () => {
 
     // Create conversation if needed
     let convId = activeConversationId;
+    let convData: { id: string; title: string; created_at: string };
+
     if (!convId) {
       const newConv = {
         id: generateId(),
@@ -91,12 +143,17 @@ export const ChatView: React.FC = () => {
       addConversation(newConv);
       setActiveConversation(newConv.id);
       convId = newConv.id;
+      convData = { id: newConv.id, title: newConv.title, created_at: newConv.created_at };
     } else {
-      // Update title if first message
       const conv = conversations.find((c) => c.id === convId);
       if (conv && conv.messages.length === 0) {
         updateConversation(convId, { title: userInput.substring(0, 40) });
       }
+      convData = {
+        id: convId,
+        title: conv?.title ?? userInput.substring(0, 40),
+        created_at: conv?.created_at ?? new Date().toISOString(),
+      };
     }
 
     // Add user message
@@ -107,6 +164,7 @@ export const ChatView: React.FC = () => {
       timestamp: new Date().toISOString(),
     };
     addMessage(convId, userMsg);
+    persistConversationAndMessage(convId, convData, userMsg).catch(console.error);
 
     // Check browser is selected
     const browser = browsers.find((b) => b.id === selectedBrowser) || browsers[0];
@@ -118,6 +176,9 @@ export const ChatView: React.FC = () => {
         timestamp: new Date().toISOString(),
       };
       addMessage(convId, errMsg);
+      await invoke('save_message', {
+        message: { ...errMsg, conversation_id: convId, agent: null, screenshot: null },
+      }).catch(console.error);
       return;
     }
 
@@ -128,28 +189,33 @@ export const ChatView: React.FC = () => {
     const sessionId = generateId();
 
     try {
-      // Launch browser
       await invoke('launch_browser', {
         browserPath: browser.path,
         headless,
         sessionId,
       });
 
-      // Run agent task
       const result = await invoke('run_agent_task', {
         taskId,
         objective: userInput,
         sessionId,
         settings,
+        forcedSkillIds: selectedSkillIds.length > 0 ? selectedSkillIds : null,
       });
 
       const doneMsg: Message = {
         id: generateId(),
         role: 'assistant',
-        content: `✅ Task completed! The agent finished with status: ${(result as { status: string }).status}`,
+        content: `✅ Task completed! Status: ${(result as { status: string }).status}`,
         timestamp: new Date().toISOString(),
       };
       addMessage(convId, doneMsg);
+      await invoke('save_message', {
+        message: { ...doneMsg, conversation_id: convId, agent: null, screenshot: null },
+      }).catch(console.error);
+
+      // Reset skill selection after task
+      setSelectedSkillIds([]);
     } catch (error) {
       const errMsg: Message = {
         id: generateId(),
@@ -158,14 +224,31 @@ export const ChatView: React.FC = () => {
         timestamp: new Date().toISOString(),
       };
       addMessage(convId, errMsg);
+      await invoke('save_message', {
+        message: { ...errMsg, conversation_id: convId, agent: null, screenshot: null },
+      }).catch(console.error);
     } finally {
       setIsAgentRunning(false);
       setCurrentTaskId(null);
     }
   }, [
-    input, isAgentRunning, activeConversationId, conversations, selectedBrowser,
-    browsers, headless, settings, addConversation, setActiveConversation,
-    addMessage, updateConversation, setIsAgentRunning, clearAgentProgress, setCurrentTaskId
+    input,
+    isAgentRunning,
+    activeConversationId,
+    conversations,
+    selectedBrowser,
+    browsers,
+    headless,
+    settings,
+    selectedSkillIds,
+    addConversation,
+    setActiveConversation,
+    addMessage,
+    updateConversation,
+    setIsAgentRunning,
+    clearAgentProgress,
+    setCurrentTaskId,
+    persistConversationAndMessage,
   ]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -175,18 +258,20 @@ export const ChatView: React.FC = () => {
     }
   };
 
+  const enabledSkills = skills.filter((s) => s.enabled);
+
   return (
     <div className="flex flex-1 overflow-hidden">
       <ChatSidebar />
 
       <div className="flex-1 flex flex-col overflow-hidden">
         {/* Header */}
-        <div className="px-4 py-3 border-b border-gray-800 flex items-center justify-between">
+        <div className="px-4 py-3 border-b border-[#1a1a1a] flex items-center justify-between bg-[#000000]">
           <div>
-            <h1 className="text-base font-semibold text-gray-100">
+            <h1 className="text-base font-semibold text-white">
               {activeConversation?.title || 'New Conversation'}
             </h1>
-            <p className="text-xs text-gray-500">AI Browser Automation</p>
+            <p className="text-xs text-[#606060]">AI Browser Automation</p>
           </div>
           <div className="flex items-center gap-3">
             <Toggle
@@ -194,7 +279,7 @@ export const ChatView: React.FC = () => {
               onChange={setHeadless}
               label="Headless"
             />
-            <div className="flex items-center gap-1.5 text-xs text-gray-500">
+            <div className="flex items-center gap-1.5 text-xs text-[#606060]">
               {headless ? (
                 <><Globe className="w-3.5 h-3.5" /> Background</>
               ) : (
@@ -205,21 +290,21 @@ export const ChatView: React.FC = () => {
         </div>
 
         {/* Browser selector */}
-        <div className="px-4 py-2 border-b border-gray-800">
+        <div className="px-4 py-2 border-b border-[#1a1a1a] bg-[#000000]">
           <BrowserSelector />
         </div>
 
         {/* Messages */}
-        <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
+        <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4 bg-[#000000]">
           {(!activeConversation || activeConversation.messages.length === 0) && (
             <div className="flex flex-col items-center justify-center h-full text-center">
               <div className="w-16 h-16 rounded-2xl bg-violet-600/20 flex items-center justify-center mb-4">
                 <Globe className="w-8 h-8 text-violet-400" />
               </div>
-              <h2 className="text-xl font-semibold text-gray-200 mb-2">
+              <h2 className="text-xl font-semibold text-white mb-2">
                 Start an AI Automation
               </h2>
-              <p className="text-gray-500 max-w-md text-sm leading-relaxed">
+              <p className="text-[#a0a0a0] max-w-md text-sm leading-relaxed">
                 Describe what you want to accomplish in the browser. The AI will plan,
                 navigate, and verify each step automatically.
               </p>
@@ -233,7 +318,7 @@ export const ChatView: React.FC = () => {
                   <button
                     key={suggestion}
                     onClick={() => setInput(suggestion)}
-                    className="text-left px-3 py-2 rounded-xl text-sm text-gray-400 bg-gray-800 hover:bg-gray-700 hover:text-gray-200 transition-colors border border-gray-700"
+                    className="text-left px-3 py-2 rounded-xl text-sm text-[#a0a0a0] bg-[#111111] hover:bg-[#1a1a1a] hover:text-white transition-colors border border-[#2a2a2a]"
                   >
                     {suggestion}
                   </button>
@@ -251,14 +336,91 @@ export const ChatView: React.FC = () => {
 
         {/* Agent status */}
         {(isAgentRunning || agentProgressCount > 0) && (
-          <div className="px-4 pb-2">
+          <div className="px-4 pb-2 bg-[#000000]">
             <AgentStatusBar />
           </div>
         )}
 
+        {/* Selected skills chips */}
+        {selectedSkillIds.length > 0 && (
+          <div className="px-4 pb-1 flex gap-1.5 flex-wrap bg-[#000000]">
+            {selectedSkillIds.map((id) => {
+              const skill = skills.find((s) => s.id === id);
+              if (!skill) return null;
+              return (
+                <span
+                  key={id}
+                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-xs bg-violet-600/20 text-violet-300 border border-violet-600/30"
+                >
+                  <Puzzle className="w-3 h-3" />
+                  {skill.name}
+                  <button
+                    onClick={() =>
+                      setSelectedSkillIds((ids) => ids.filter((i) => i !== id))
+                    }
+                    className="hover:text-white"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                </span>
+              );
+            })}
+          </div>
+        )}
+
         {/* Input area */}
-        <div className="px-4 pb-4 pt-2">
-          <div className="flex items-end gap-3 bg-gray-800 rounded-2xl p-3 border border-gray-700 focus-within:border-violet-500 transition-colors">
+        <div className="px-4 pb-4 pt-2 bg-[#000000]">
+          <div className="flex items-end gap-2 bg-[#111111] rounded-xl p-3 border border-[#2a2a2a] focus-within:border-violet-500 transition-colors">
+            {/* Skill picker button */}
+            <div className="relative" ref={skillPickerRef}>
+              <button
+                type="button"
+                onClick={() => setShowSkillPicker((v) => !v)}
+                title="Select skills"
+                className="p-1.5 rounded-lg text-[#606060] hover:text-violet-400 hover:bg-[#1a1a1a] transition-colors"
+              >
+                <Puzzle className="w-4 h-4" />
+              </button>
+
+              {showSkillPicker && (
+                <div className="absolute bottom-full left-0 mb-2 w-60 bg-[#111111] border border-[#2a2a2a] rounded-xl shadow-2xl overflow-hidden z-50">
+                  <div className="px-3 py-2 border-b border-[#2a2a2a]">
+                    <p className="text-xs font-medium text-[#a0a0a0]">Force Skills</p>
+                  </div>
+                  {enabledSkills.length === 0 ? (
+                    <p className="text-xs text-[#606060] px-3 py-3">No enabled skills</p>
+                  ) : (
+                    <div className="max-h-48 overflow-y-auto">
+                      {enabledSkills.map((skill) => {
+                        const selected = selectedSkillIds.includes(skill.id);
+                        return (
+                          <button
+                            key={skill.id}
+                            onClick={() => {
+                              setSelectedSkillIds((ids) =>
+                                selected
+                                  ? ids.filter((i) => i !== skill.id)
+                                  : [...ids, skill.id]
+                              );
+                            }}
+                            className={`w-full text-left px-3 py-2 text-xs flex items-center gap-2 hover:bg-[#1a1a1a] transition-colors ${
+                              selected ? 'text-violet-300' : 'text-[#a0a0a0]'
+                            }`}
+                          >
+                            <Puzzle className="w-3 h-3 shrink-0" />
+                            <span className="truncate">{skill.name}</span>
+                            {selected && (
+                              <span className="ml-auto text-violet-400">✓</span>
+                            )}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
             <textarea
               ref={textareaRef}
               value={input}
@@ -267,7 +429,7 @@ export const ChatView: React.FC = () => {
               placeholder="Describe what you want to automate..."
               disabled={isAgentRunning}
               rows={1}
-              className="flex-1 bg-transparent text-sm text-gray-100 placeholder-gray-500 resize-none focus:outline-none max-h-32 leading-relaxed"
+              className="flex-1 bg-transparent text-sm text-white placeholder-[#404040] resize-none focus:outline-none max-h-32 leading-relaxed"
               style={{ minHeight: '24px' }}
             />
             <Button
@@ -283,8 +445,8 @@ export const ChatView: React.FC = () => {
               )}
             </Button>
           </div>
-          <p className="text-xs text-gray-600 mt-1.5 text-center">
-            Press Enter to send, Shift+Enter for new line
+          <p className="text-xs text-[#606060] mt-1.5 text-center">
+            Enter to send · Shift+Enter for new line
           </p>
         </div>
       </div>

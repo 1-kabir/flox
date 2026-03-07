@@ -5,9 +5,9 @@ import {
   Settings,
   ScrollText,
   Zap,
-  Sun,
-  Moon,
   Puzzle,
+  Wifi,
+  WifiOff,
 } from 'lucide-react';
 import { useAppStore } from '../store';
 import { cn } from '../lib/utils';
@@ -21,13 +21,13 @@ const navItems = [
 ] as const;
 
 export const Sidebar: React.FC = () => {
-  const { activeTab, setActiveTab, theme, toggleTheme } = useAppStore();
+  const { activeTab, setActiveTab, isOnline } = useAppStore();
 
   return (
-    <aside className="w-16 flex flex-col items-center py-4 gap-2 border-r border-gray-800 bg-gray-950">
+    <aside className="w-14 flex flex-col items-center py-4 gap-2 border-r border-[#1a1a1a] bg-[#000000]">
       {/* Logo */}
-      <div className="w-10 h-10 rounded-xl bg-violet-600 flex items-center justify-center mb-4">
-        <Zap className="w-5 h-5 text-white" />
+      <div className="w-9 h-9 rounded-xl bg-violet-600 flex items-center justify-center mb-2">
+        <Zap className="w-4 h-4 text-white" />
       </div>
 
       {/* Nav items */}
@@ -38,29 +38,28 @@ export const Sidebar: React.FC = () => {
             onClick={() => setActiveTab(id)}
             title={label}
             className={cn(
-              'w-11 h-11 flex items-center justify-center rounded-xl transition-all duration-200',
+              'w-10 h-10 flex items-center justify-center rounded-xl transition-all duration-200',
               activeTab === id
                 ? 'bg-violet-600 text-white shadow-lg shadow-violet-500/25'
-                : 'text-gray-500 hover:text-gray-300 hover:bg-gray-800'
+                : 'text-[#606060] hover:text-[#a0a0a0] hover:bg-[#111111]'
             )}
           >
-            <Icon className="w-5 h-5" />
+            <Icon className="w-4 h-4" />
           </button>
         ))}
       </nav>
 
-      {/* Theme toggle */}
-      <button
-        onClick={toggleTheme}
-        title="Toggle theme"
-        className="w-11 h-11 flex items-center justify-center rounded-xl text-gray-500 hover:text-gray-300 hover:bg-gray-800 transition-all duration-200"
+      {/* Network status indicator */}
+      <div
+        title={isOnline ? 'Online' : 'Offline — waiting for network'}
+        className="w-10 h-10 flex items-center justify-center"
       >
-        {theme === 'dark' ? (
-          <Sun className="w-5 h-5" />
+        {isOnline ? (
+          <Wifi className="w-4 h-4 text-green-500" />
         ) : (
-          <Moon className="w-5 h-5" />
+          <WifiOff className="w-4 h-4 text-red-500 animate-pulse" />
         )}
-      </button>
+      </div>
     </aside>
   );
 };

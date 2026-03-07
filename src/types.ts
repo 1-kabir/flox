@@ -23,12 +23,15 @@ export interface AppSettings {
   headless_mode: boolean;
   theme: string;
   screenshots_enabled: boolean;
+  planner_vision: boolean;
+  navigator_vision: boolean;
   max_steps: number;
   timeout_seconds: number;
 }
 
 export interface Message {
   id: string;
+  conversation_id?: string;
   role: 'user' | 'assistant' | 'system' | 'agent';
   content: string;
   timestamp: string;
@@ -132,4 +135,3 @@ export interface ApprovalRequest {
   reason: string;
   timestamp: string;
 }
-

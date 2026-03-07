@@ -1,17 +1,17 @@
 use serde::{Deserialize, Serialize};
-use std::sync::{Arc, Mutex};
 use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 use once_cell::sync::Lazy;
 use tauri::Emitter;
 
 use crate::settings::{AppSettings, ModelConfig};
 use crate::browser::{BrowserAction, ActionResult};
+use crate::network;
 
 // ---------------------------------------------------------------------------
 // Human-in-the-loop approval plumbing
 // ---------------------------------------------------------------------------
 
-/// Pending approval channels, keyed by approval_id.
 static PENDING_APPROVALS: Lazy<Arc<Mutex<HashMap<String, tokio::sync::oneshot::Sender<bool>>>>> =
     Lazy::new(|| Arc::new(Mutex::new(HashMap::new())));
 
@@ -43,45 +43,61 @@ async fn request_human_approval(
         map.insert(approval_id.clone(), tx);
     }
 
-    let _ = app.emit("approval_required", serde_json::json!({
-        "approval_id": approval_id,
-        "task_id": task_id,
-        "action": action,
-        "reason": reason,
-        "timestamp": chrono::Utc::now().to_rfc3339()
-    }));
+    let _ = app.emit(
+        "approval_required",
+        serde_json::json!({
+            "approval_id": approval_id,
+            "task_id": task_id,
+            "action": action,
+            "reason": reason,
+            "timestamp": chrono::Utc::now().to_rfc3339()
+        }),
+    );
 
-    // Wait up to 120 seconds for user decision; default to approved = false on timeout.
-    tokio::time::timeout(
-        tokio::time::Duration::from_secs(120),
-        rx,
-    )
-    .await
-    .unwrap_or(Ok(false))
-    .unwrap_or(false)
+    // OS notification so background automations surface to the user.
+    #[cfg(not(test))]
+    {
+        use tauri_plugin_notification::NotificationExt;
+        let body = format!("Action: {}. {}", action.action_type, reason);
+        let _ = app
+            .notification()
+            .builder()
+            .title("Flox — Approval Required")
+            .body(&body)
+            .show();
+    }
+
+    tokio::time::timeout(tokio::time::Duration::from_secs(120), rx)
+        .await
+        .unwrap_or(Ok(false))
+        .unwrap_or(false)
 }
 
-/// Returns `true` when an action is considered risky and should require human approval.
-fn is_risky_action(action: &BrowserAction) -> bool {
+/// Returns a risk-hint string if the action looks risky, or `None` otherwise.
+fn risk_hint(action: &BrowserAction) -> Option<String> {
     match action.action_type.as_str() {
         "navigate" => {
-            // External payment or account-management pages are risky.
-            let risky_patterns = ["checkout", "payment", "pay", "billing", "account/delete", "confirm", "submit"];
-            action.url.as_deref().map(|u| {
+            let risky = ["checkout", "payment", "pay", "billing", "account/delete", "confirm", "submit"];
+            action.url.as_deref().and_then(|u| {
                 let l = u.to_lowercase();
-                risky_patterns.iter().any(|p| l.contains(p))
-            }).unwrap_or(false)
+                if risky.iter().any(|p| l.contains(p)) {
+                    Some(format!("Navigating to potentially sensitive URL: {}", u))
+                } else {
+                    None
+                }
+            })
         }
         "click" => {
-            let risky_patterns = ["submit", "buy", "purchase", "checkout", "confirm", "delete", "remove", "pay"];
+            let risky = ["submit", "buy", "purchase", "checkout", "confirm", "delete", "remove", "pay"];
             let target = action.selector.as_deref().unwrap_or("").to_lowercase();
-            risky_patterns.iter().any(|p| target.contains(p))
+            if risky.iter().any(|p| target.contains(p)) {
+                Some(format!("Clicking potentially risky element: {}", target))
+            } else {
+                None
+            }
         }
-        "evaluate" => {
-            // Arbitrary JS is inherently risky.
-            true
-        }
-        _ => false,
+        "evaluate" => Some("Executing arbitrary JavaScript".to_string()),
+        _ => None,
     }
 }
 
@@ -90,7 +106,7 @@ fn is_risky_action(action: &BrowserAction) -> bool {
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Message {
+pub struct LlmMessage {
     pub role: String,
     pub content: String,
 }
@@ -117,6 +133,10 @@ pub struct AgentStep {
 static RUNNING_TASKS: Lazy<Arc<Mutex<HashMap<String, bool>>>> =
     Lazy::new(|| Arc::new(Mutex::new(HashMap::new())));
 
+// ---------------------------------------------------------------------------
+// Public Tauri commands
+// ---------------------------------------------------------------------------
+
 #[tauri::command]
 pub async fn run_agent_task(
     app: tauri::AppHandle,
@@ -124,6 +144,7 @@ pub async fn run_agent_task(
     objective: String,
     session_id: String,
     settings: AppSettings,
+    forced_skill_ids: Option<Vec<String>>,
 ) -> Result<AgentTask, String> {
     {
         let mut tasks = RUNNING_TASKS.lock().unwrap();
@@ -138,25 +159,36 @@ pub async fn run_agent_task(
         steps: Vec::new(),
     };
 
+    let forced_ids_ref: Option<&[String]> = forced_skill_ids.as_deref();
+
     // Load skill prompt injections
     let (skill_planner_prompt, skill_navigator_prompt) =
-        crate::skills::get_relevant_skill_prompts(&app, &objective, None).await;
+        crate::skills::get_relevant_skill_prompts(&app, &objective, None, forced_ids_ref).await;
+
+    // Collect active permissions for verifier context
+    let skill_permissions =
+        crate::skills::get_active_skill_permissions(&app, &objective, None, forced_ids_ref).await;
 
     // PLANNING PHASE
     emit_progress(&app, &task_id, "planner", "Planning the task...", None);
 
-    let plan = call_planner(&settings.planner_model, &objective, &[], skill_planner_prompt.as_deref()).await
-        .map_err(|e| format!("Planner error: {}", e))?;
+    let plan = call_planner(
+        &settings.planner_model,
+        &objective,
+        skill_planner_prompt.as_deref(),
+        settings.planner_vision,
+    )
+    .await
+    .map_err(|e| format!("Planner error: {}", e))?;
 
-    let plan_step = AgentStep {
+    agent_task.steps.push(AgentStep {
         step_id: uuid::Uuid::new_v4().to_string(),
         agent: "planner".to_string(),
         thought: plan.clone(),
         action: None,
         result: None,
         timestamp: chrono::Utc::now().to_rfc3339(),
-    };
-    agent_task.steps.push(plan_step);
+    });
 
     emit_progress(&app, &task_id, "planner", &plan, None);
 
@@ -166,15 +198,22 @@ pub async fn run_agent_task(
     } else {
         get_navigator_system_prompt()
     };
-    let mut conversation_history: Vec<Message> = vec![
-        Message { role: "system".to_string(), content: navigator_system },
-        Message { role: "user".to_string(), content: format!("Objective: {}\n\nPlan:\n{}", objective, plan) },
+
+    let mut conversation_history: Vec<LlmMessage> = vec![
+        LlmMessage {
+            role: "system".to_string(),
+            content: navigator_system,
+        },
+        LlmMessage {
+            role: "user".to_string(),
+            content: format!("Objective: {}\n\nPlan:\n{}", objective, plan),
+        },
     ];
 
     let max_steps = settings.max_steps as usize;
+    let mut last_url: Option<String> = None;
 
     for step_num in 0..max_steps {
-        // Check if task was stopped
         {
             let tasks = RUNNING_TASKS.lock().unwrap();
             if !tasks.get(&task_id).copied().unwrap_or(false) {
@@ -183,113 +222,230 @@ pub async fn run_agent_task(
             }
         }
 
-        // Take screenshot
-        let screenshot = crate::browser::take_screenshot(session_id.clone()).await.ok();
+        // Network availability check — wait until online before calling LLM.
+        while !network::is_online() {
+            emit_progress(
+                &app,
+                &task_id,
+                "navigator",
+                "⏸ Waiting for network connection...",
+                None,
+            );
+            tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
+        }
 
-        // Call navigator
-        emit_progress(&app, &task_id, "navigator", &format!("Step {}: Determining next action...", step_num + 1), screenshot.clone());
+        // Take screenshot (used when vision is enabled).
+        let screenshot = if settings.screenshots_enabled {
+            crate::browser::take_screenshot(session_id.clone()).await.ok()
+        } else {
+            None
+        };
+
+        emit_progress(
+            &app,
+            &task_id,
+            "navigator",
+            &format!("Step {}: Determining next action...", step_num + 1),
+            screenshot.clone(),
+        );
+
+        // If navigator_vision is disabled, extract page context as text instead.
+        let page_context = if settings.screenshots_enabled && !settings.navigator_vision {
+            let js = r#"JSON.stringify({
+  url: location.href,
+  title: document.title,
+  interactive: Array.from(document.querySelectorAll('a,button,input,select,textarea,[role="button"],[onclick]')).map(el => ({
+    tag: el.tagName,
+    type: el.type||null,
+    text: (el.innerText||el.value||el.placeholder||'').trim().slice(0,120),
+    selector: el.id ? '#'+el.id : el.name ? '[name="'+el.name+'"]' : el.className ? '.'+el.className.split(' ')[0] : el.tagName.toLowerCase()
+  })),
+  bodyText: document.body?.innerText?.slice(0,3000)
+})"#;
+            let action = BrowserAction {
+                action_type: "evaluate".to_string(),
+                selector: None,
+                value: Some(js.to_string()),
+                x: None,
+                y: None,
+                url: None,
+                key: None,
+                scroll_x: None,
+                scroll_y: None,
+                screenshot: None,
+            };
+            crate::browser::execute_action(session_id.clone(), action)
+                .await
+                .ok()
+                .and_then(|r| r.data)
+                .and_then(|d| serde_json::to_string(&d).ok())
+        } else {
+            None
+        };
 
         let nav_response = call_navigator(
             &settings.navigator_model,
             &mut conversation_history,
-            screenshot.as_deref(),
-        ).await;
+            if settings.navigator_vision { screenshot.as_deref() } else { None },
+            page_context.as_deref(),
+        )
+        .await;
 
         match nav_response {
             Ok((thought, maybe_action, is_done)) => {
                 if is_done {
                     agent_task.status = "completed".to_string();
-                    let done_step = AgentStep {
+                    agent_task.steps.push(AgentStep {
                         step_id: uuid::Uuid::new_v4().to_string(),
                         agent: "navigator".to_string(),
                         thought: thought.clone(),
                         action: None,
                         result: None,
                         timestamp: chrono::Utc::now().to_rfc3339(),
-                    };
-                    agent_task.steps.push(done_step);
+                    });
                     emit_progress(&app, &task_id, "navigator", &thought, None);
                     break;
                 }
 
                 if let Some(action) = maybe_action {
-                    // VERIFICATION PHASE (LLM verifier)
+                    let hint = risk_hint(&action);
+
+                    // VERIFICATION PHASE
                     let verification = call_verifier(
                         &settings.verifier_model,
                         &objective,
                         &thought,
                         &action,
-                    ).await;
+                        hint.as_deref(),
+                        &skill_permissions,
+                    )
+                    .await;
 
-                    let verified = match &verification {
+                    let (verified, verify_reason) = match &verification {
                         Ok((approved, reason)) => {
                             emit_progress(&app, &task_id, "verifier", reason, None);
-                            *approved
+                            (*approved, reason.clone())
                         }
                         Err(e) => {
-                            emit_progress(&app, &task_id, "verifier", &format!("Verification error: {}", e), None);
-                            false
+                            emit_progress(
+                                &app,
+                                &task_id,
+                                "verifier",
+                                &format!("Verification error: {}", e),
+                                None,
+                            );
+                            (false, String::new())
                         }
                     };
 
-                    if !verified {
-                        let reason = verification.ok().map(|(_, r)| r).unwrap_or_default();
-                        conversation_history.push(Message {
+                    // Require human approval when verifier rejects OR both risk_hint and
+                    // verifier flag the action.
+                    let needs_approval =
+                        !verified || (hint.is_some() && !verified);
+
+                    if needs_approval {
+                        let approval_reason = if verify_reason.is_empty() {
+                            hint.clone().unwrap_or_else(|| {
+                                format!("Action flagged as potentially unsafe: {}", action.action_type)
+                            })
+                        } else {
+                            verify_reason.clone()
+                        };
+
+                        emit_progress(
+                            &app,
+                            &task_id,
+                            "verifier",
+                            "⏳ Awaiting human approval...",
+                            None,
+                        );
+                        let human_approved =
+                            request_human_approval(&app, &action, &approval_reason, &task_id)
+                                .await;
+                        if !human_approved {
+                            conversation_history.push(LlmMessage {
+                                role: "assistant".to_string(),
+                                content: thought.clone(),
+                            });
+                            conversation_history.push(LlmMessage {
+                                role: "user".to_string(),
+                                content:
+                                    "Action was rejected. Please choose a safer alternative."
+                                        .to_string(),
+                            });
+                            continue;
+                        }
+                        emit_progress(&app, &task_id, "verifier", "✅ Human approved.", None);
+                    } else if !verified {
+                        conversation_history.push(LlmMessage {
                             role: "assistant".to_string(),
                             content: thought.clone(),
                         });
-                        conversation_history.push(Message {
+                        conversation_history.push(LlmMessage {
                             role: "user".to_string(),
-                            content: format!("Action was rejected by verifier: {}. Please choose a different action.", reason),
+                            content: format!(
+                                "Action rejected by verifier: {}. Please choose a different action.",
+                                verify_reason
+                            ),
                         });
                         continue;
                     }
 
-                    // HUMAN-IN-THE-LOOP: require approval for risky actions
-                    if is_risky_action(&action) {
-                        let reason = format!("Risky action proposed: {}. Thought: {}", action.action_type, thought);
-                        emit_progress(&app, &task_id, "verifier", "⏳ Awaiting human approval for risky action...", None);
-                        let human_approved = request_human_approval(&app, &action, &reason, &task_id).await;
-                        if !human_approved {
-                            conversation_history.push(Message {
-                                role: "assistant".to_string(),
-                                content: thought.clone(),
-                            });
-                            conversation_history.push(Message {
-                                role: "user".to_string(),
-                                content: "Action was rejected by the user. Please choose a safer alternative.".to_string(),
-                            });
-                            continue;
-                        }
-                        emit_progress(&app, &task_id, "verifier", "✅ Human approved the action.", None);
-                    }
-
                     // Execute action
-                    let action_result = crate::browser::execute_action(
-                        session_id.clone(),
-                        action.clone(),
-                    ).await;
+                    let action_result =
+                        crate::browser::execute_action(session_id.clone(), action.clone()).await;
+
+                    // Mid-task skill re-injection on URL change.
+                    if action.action_type == "navigate" || action.action_type == "click" {
+                        if let Ok(new_url) = get_current_url(&session_id).await {
+                            if last_url.as_deref() != Some(&new_url) {
+                                last_url = Some(new_url.clone());
+                                let (_, new_nav_prompt) = crate::skills::get_relevant_skill_prompts(
+                                    &app,
+                                    &objective,
+                                    Some(&new_url),
+                                    forced_ids_ref,
+                                )
+                                .await;
+                                if let Some(extra) = new_nav_prompt {
+                                    conversation_history.push(LlmMessage {
+                                        role: "user".to_string(),
+                                        content: format!(
+                                            "[Skill context updated for {}]\n{}",
+                                            new_url, extra
+                                        ),
+                                    });
+                                }
+                            }
+                        }
+                    }
 
                     let result = match &action_result {
                         Ok(r) => {
-                            conversation_history.push(Message {
+                            conversation_history.push(LlmMessage {
                                 role: "assistant".to_string(),
                                 content: thought.clone(),
                             });
-                            conversation_history.push(Message {
+                            conversation_history.push(LlmMessage {
                                 role: "user".to_string(),
-                                content: format!("Action executed successfully. Result: {:?}", r.data),
+                                content: format!(
+                                    "Action executed successfully. Result: {:?}",
+                                    r.data
+                                ),
                             });
                             r.clone()
                         }
                         Err(e) => {
-                            conversation_history.push(Message {
+                            conversation_history.push(LlmMessage {
                                 role: "assistant".to_string(),
                                 content: thought.clone(),
                             });
-                            conversation_history.push(Message {
+                            conversation_history.push(LlmMessage {
                                 role: "user".to_string(),
-                                content: format!("Action failed with error: {}. Please try a different approach.", e),
+                                content: format!(
+                                    "Action failed: {}. Please try a different approach.",
+                                    e
+                                ),
                             });
                             ActionResult {
                                 success: false,
@@ -308,9 +464,11 @@ pub async fn run_agent_task(
                         result: Some(result),
                         timestamp: chrono::Utc::now().to_rfc3339(),
                     };
-                    agent_task.steps.push(step);
 
-                    // Small delay between actions
+                    // Persist step immediately to SQLite.
+                    persist_agent_step(&task_id, &step);
+
+                    agent_task.steps.push(step);
                     tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
                 }
             }
@@ -341,6 +499,10 @@ pub async fn stop_agent_task(task_id: String) -> Result<(), String> {
     Ok(())
 }
 
+// ---------------------------------------------------------------------------
+// Private helpers
+// ---------------------------------------------------------------------------
+
 fn emit_progress(
     app: &tauri::AppHandle,
     task_id: &str,
@@ -348,16 +510,57 @@ fn emit_progress(
     message: &str,
     screenshot: Option<String>,
 ) {
-    let _ = app.emit("agent_progress", serde_json::json!({
-        "task_id": task_id,
-        "agent": agent,
-        "message": message,
-        "screenshot": screenshot,
-        "timestamp": chrono::Utc::now().to_rfc3339()
-    }));
+    let _ = app.emit(
+        "agent_progress",
+        serde_json::json!({
+            "task_id": task_id,
+            "agent": agent,
+            "message": message,
+            "screenshot": screenshot,
+            "timestamp": chrono::Utc::now().to_rfc3339()
+        }),
+    );
 }
 
-async fn call_planner(model: &ModelConfig, objective: &str, _context: &[Message], skill_prompt: Option<&str>) -> Result<String, anyhow::Error> {
+fn persist_agent_step(task_id: &str, step: &AgentStep) {
+    let id = uuid::Uuid::new_v4().to_string();
+    let data = serde_json::to_string(step).unwrap_or_default();
+    let now = chrono::Utc::now().to_rfc3339();
+    let _ = crate::db::with_conn(|conn| {
+        conn.execute(
+            "INSERT INTO agent_steps (id, task_id, data, created_at) VALUES (?1, ?2, ?3, ?4)",
+            rusqlite::params![id, task_id, data, now],
+        )?;
+        Ok(())
+    });
+}
+
+async fn get_current_url(session_id: &str) -> Result<String, String> {
+    let action = BrowserAction {
+        action_type: "evaluate".to_string(),
+        selector: None,
+        value: Some("location.href".to_string()),
+        x: None,
+        y: None,
+        url: None,
+        key: None,
+        scroll_x: None,
+        scroll_y: None,
+        screenshot: None,
+    };
+    let result = crate::browser::execute_action(session_id.to_string(), action).await?;
+    result
+        .data
+        .and_then(|v| v.as_str().map(|s| s.to_string()))
+        .ok_or("no href".to_string())
+}
+
+async fn call_planner(
+    model: &ModelConfig,
+    objective: &str,
+    skill_prompt: Option<&str>,
+    _vision_enabled: bool,
+) -> Result<String, anyhow::Error> {
     let mut system_prompt = r#"You are an expert web automation planner. Your job is to break down a user's objective into a clear, step-by-step plan for browser automation.
 
 Analyze the objective and create a concise plan with numbered steps. Each step should be specific and actionable (navigate to URL, click button, fill form, etc.).
@@ -373,37 +576,40 @@ Keep the plan focused and efficient. Don't over-engineer it."#.to_string();
         serde_json::json!({"role": "user", "content": format!("Create a browser automation plan for: {}", objective)}),
     ];
 
-    call_llm(model, messages).await
+    call_llm_with_retry(model, messages).await
 }
 
 async fn call_navigator(
     model: &ModelConfig,
-    history: &mut Vec<Message>,
+    history: &mut Vec<LlmMessage>,
     screenshot: Option<&str>,
+    page_context: Option<&str>,
 ) -> Result<(String, Option<BrowserAction>, bool), anyhow::Error> {
     let mut messages: Vec<serde_json::Value> = history
         .iter()
         .map(|m| serde_json::json!({"role": m.role, "content": m.content}))
         .collect();
 
-    // Add screenshot if available
-    if let Some(ss) = screenshot {
-        let last_user_msg = messages.last_mut()
-            .filter(|m| m["role"] == "user");
-        if let Some(msg) = last_user_msg {
-            if let Some(content) = msg["content"].as_str().map(|s| s.to_string()) {
-                let content_with_image = serde_json::json!([
-                    {"type": "text", "text": content},
+    // Append page context or screenshot to the last user message.
+    if let Some(last) = messages.last_mut().filter(|m| m["role"] == "user") {
+        if let Some(ss) = screenshot {
+            if let Some(text) = last["content"].as_str().map(|s| s.to_string()) {
+                last["content"] = serde_json::json!([
+                    {"type": "text", "text": text},
                     {"type": "image_url", "image_url": {"url": format!("data:image/jpeg;base64,{}", ss)}}
                 ]);
-                msg["content"] = content_with_image;
+            }
+        } else if let Some(ctx) = page_context {
+            if let Some(existing) = last["content"].as_str() {
+                last["content"] = serde_json::json!(format!(
+                    "{}\n\n[Page context]\n{}",
+                    existing, ctx
+                ));
             }
         }
     }
 
-    let response = call_llm(model, messages).await?;
-
-    // Parse the response to extract action
+    let response = call_llm_with_retry(model, messages).await?;
     let (thought, action, is_done) = parse_navigator_response(&response);
     Ok((thought, action, is_done))
 }
@@ -413,39 +619,99 @@ async fn call_verifier(
     objective: &str,
     thought: &str,
     action: &BrowserAction,
+    risk_hint_msg: Option<&str>,
+    skill_permissions: &[String],
 ) -> Result<(bool, String), anyhow::Error> {
+    let perms_str = if skill_permissions.is_empty() {
+        "none".to_string()
+    } else {
+        skill_permissions.join(", ")
+    };
+
+    let mut context = format!(
+        "Objective: {}\nProposed action: {:?}\nReasoning: {}\nActive skill permissions: {}",
+        objective, action, thought, perms_str
+    );
+
+    if let Some(hint) = risk_hint_msg {
+        context.push_str(&format!("\nRisk hint: {}", hint));
+    }
+
     let messages = vec![
         serde_json::json!({
             "role": "system",
-            "content": "You are a browser automation safety verifier. Verify if the proposed action is safe, appropriate, and aligned with the objective. Respond with JSON: {\"approved\": true/false, \"reason\": \"explanation\"}"
+            "content": "You are a browser automation safety verifier. Given the objective, active skill permissions, and any risk hints, determine if the proposed action is safe and appropriate. Respond ONLY with JSON: {\"approved\": true/false, \"reason\": \"explanation\"}"
         }),
         serde_json::json!({
             "role": "user",
-            "content": format!(
-                "Objective: {}\nProposed action: {:?}\nReasoning: {}\n\nIs this action safe and appropriate?",
-                objective, action, thought
-            )
-        })
+            "content": format!("{}\n\nIs this action safe and appropriate?", context)
+        }),
     ];
 
-    let response = call_llm(model, messages).await?;
+    let response = call_llm_with_retry(model, messages).await?;
 
-    // Parse JSON response
-    let parsed: serde_json::Value = serde_json::from_str(&response)
-        .or_else(|_| {
-            // Try to extract JSON from response
-            if let Some(start) = response.find('{') {
-                if let Some(end) = response.rfind('}') {
-                    return serde_json::from_str(&response[start..=end]);
-                }
+    let parsed: serde_json::Value = serde_json::from_str(&response).or_else(|_| {
+        if let Some(start) = response.find('{') {
+            if let Some(end) = response.rfind('}') {
+                return serde_json::from_str(&response[start..=end]);
             }
-            Ok(serde_json::json!({"approved": true, "reason": "Unable to parse verification response, proceeding"}))
-        })?;
+        }
+        Ok(serde_json::json!({"approved": true, "reason": "Unable to parse verification response"}))
+    })?;
 
     let approved = parsed["approved"].as_bool().unwrap_or(true);
     let reason = parsed["reason"].as_str().unwrap_or("").to_string();
-
     Ok((approved, reason))
+}
+
+/// Call an LLM with exponential-backoff retry (max 4 attempts).
+/// Handles 429, 503 (retry), 413 (truncate + retry once), other 4xx (no retry).
+async fn call_llm_with_retry(
+    model: &ModelConfig,
+    messages: Vec<serde_json::Value>,
+) -> Result<String, anyhow::Error> {
+    let mut attempt = 0u32;
+    let max_attempts = 4u32;
+
+    loop {
+        match call_llm(model, messages.clone()).await {
+            Ok(resp) => return Ok(resp),
+            Err(e) => {
+                let msg = e.to_string();
+                attempt += 1;
+
+                if msg.contains("429") || msg.contains("503") {
+                    if attempt >= max_attempts {
+                        return Err(e);
+                    }
+                    let wait = (2u64.pow(attempt)).min(30);
+                    tokio::time::sleep(tokio::time::Duration::from_secs(wait)).await;
+                    continue;
+                } else if msg.contains("413") {
+                    if attempt >= 2 {
+                        return Err(e);
+                    }
+                    // Truncate messages and retry once.
+                    let truncated = truncate_messages(messages.clone());
+                    return call_llm(model, truncated).await;
+                } else {
+                    return Err(e);
+                }
+            }
+        }
+    }
+}
+
+/// Naively truncate message content to reduce payload size.
+fn truncate_messages(mut messages: Vec<serde_json::Value>) -> Vec<serde_json::Value> {
+    for msg in &mut messages {
+        if let Some(s) = msg["content"].as_str() {
+            if s.len() > 4000 {
+                msg["content"] = serde_json::json!(&s[..4000]);
+            }
+        }
+    }
+    messages
 }
 
 async fn call_llm(
@@ -479,16 +745,13 @@ async fn call_llm(
         req = req.header("Authorization", format!("Bearer {}", model.api_key));
     }
 
-    // Anthropic uses different header
     if model.provider == "anthropic" {
-        req = req.header("x-api-key", &model.api_key)
+        req = req
+            .header("x-api-key", &model.api_key)
             .header("anthropic-version", "2023-06-01");
     }
 
-    let response = req
-        .json(&request_body)
-        .send()
-        .await?;
+    let response = req.json(&request_body).send().await?;
 
     if !response.status().is_success() {
         let status = response.status();
@@ -541,11 +804,10 @@ fn parse_navigator_response(response: &str) -> (String, Option<BrowserAction>, b
     let is_done = response.contains("DONE");
 
     for line in response.lines() {
-        if line.starts_with("THOUGHT:") {
-            thought = line["THOUGHT:".len()..].trim().to_string();
-        } else if line.starts_with("ACTION:") {
-            let action_str = line["ACTION:".len()..].trim();
-            if let Ok(parsed) = serde_json::from_str::<BrowserAction>(action_str) {
+        if let Some(rest) = line.strip_prefix("THOUGHT:") {
+            thought = rest.trim().to_string();
+        } else if let Some(rest) = line.strip_prefix("ACTION:") {
+            if let Ok(parsed) = serde_json::from_str::<BrowserAction>(rest.trim()) {
                 action = Some(parsed);
             }
         }

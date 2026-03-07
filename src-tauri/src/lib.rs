@@ -3,8 +3,9 @@ mod automation;
 mod settings;
 mod agents;
 mod skills;
-
-use tauri_plugin_store::StoreExt;
+mod db;
+mod network;
+mod conversations;
 
 pub fn run() {
     tauri::Builder::default()
@@ -12,10 +13,15 @@ pub fn run() {
         .plugin(tauri_plugin_store::Builder::default().build())
         .plugin(tauri_plugin_notification::init())
         .setup(|app| {
-            let store = app.store("flox_store.bin")?;
-            drop(store);
+            // Initialise SQLite database.
+            let data_dir = app
+                .path()
+                .app_data_dir()
+                .expect("app data dir not available");
+            std::fs::create_dir_all(&data_dir)?;
+            db::init(data_dir).map_err(|e| e.to_string())?;
 
-            // Set up automation scheduler
+            // Set up automation scheduler.
             let app_handle = app.handle().clone();
             tokio::spawn(async move {
                 automation::start_automation_scheduler(app_handle).await;
@@ -43,8 +49,16 @@ pub fn run() {
             automation::clear_automation_logs,
             skills::get_skills,
             skills::install_skill,
+            skills::create_skill,
+            skills::update_skill,
             skills::uninstall_skill,
             skills::toggle_skill,
+            conversations::get_conversations,
+            conversations::save_conversation,
+            conversations::delete_conversation,
+            conversations::get_messages,
+            conversations::save_message,
+            network::check_network,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

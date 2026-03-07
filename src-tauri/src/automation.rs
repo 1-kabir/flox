@@ -1,8 +1,8 @@
 use serde::{Deserialize, Serialize};
 use tauri::Emitter;
-use tauri_plugin_store::StoreExt;
 use uuid::Uuid;
 
+use crate::db;
 use crate::settings::AppSettings;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -21,6 +21,7 @@ pub struct Automation {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AutomationLog {
+    pub id: String,
     pub automation_id: String,
     pub timestamp: String,
     pub status: String,
@@ -28,152 +29,136 @@ pub struct AutomationLog {
     pub steps: u32,
 }
 
+// ---------------------------------------------------------------------------
+// Tauri commands
+// ---------------------------------------------------------------------------
+
 #[tauri::command]
-pub async fn get_automations(app: tauri::AppHandle) -> Result<Vec<Automation>, String> {
-    let store = app.store("flox_store.bin").map_err(|e| e.to_string())?;
-
-    let automations: Vec<Automation> = store
-        .get("automations")
-        .and_then(|v| serde_json::from_value(v).ok())
-        .unwrap_or_default();
-
-    Ok(automations)
+pub async fn get_automations(_app: tauri::AppHandle) -> Result<Vec<Automation>, String> {
+    db::with_conn(|conn| {
+        let mut stmt = conn.prepare("SELECT data FROM automations ORDER BY rowid")?;
+        let rows = stmt.query_map([], |row| {
+            let json: String = row.get(0)?;
+            serde_json::from_str(&json)
+                .map_err(|e| rusqlite::Error::InvalidParameterName(e.to_string()))
+        })?;
+        rows.collect()
+    })
 }
 
 #[tauri::command]
 pub async fn save_automation(
-    app: tauri::AppHandle,
+    _app: tauri::AppHandle,
     automation: Automation,
 ) -> Result<Automation, String> {
-    let store = app.store("flox_store.bin").map_err(|e| e.to_string())?;
-
-    let mut automations: Vec<Automation> = store
-        .get("automations")
-        .and_then(|v| serde_json::from_value(v).ok())
-        .unwrap_or_default();
-
-    let is_new = automation.id.is_empty();
     let mut auto = automation;
 
-    if is_new {
+    if auto.id.is_empty() {
         auto.id = Uuid::new_v4().to_string();
         auto.created_at = chrono::Utc::now().to_rfc3339();
-        automations.push(auto.clone());
-    } else if let Some(existing) = automations.iter_mut().find(|a| a.id == auto.id) {
-        *existing = auto.clone();
-    } else {
-        automations.push(auto.clone());
     }
 
-    store.set(
-        "automations",
-        serde_json::to_value(&automations).map_err(|e| e.to_string())?,
-    );
-    store.save().map_err(|e| e.to_string())?;
+    let json = serde_json::to_string(&auto).map_err(|e| e.to_string())?;
+    db::with_conn(|conn| {
+        conn.execute(
+            "INSERT INTO automations (id, data) VALUES (?1, ?2)
+             ON CONFLICT(id) DO UPDATE SET data = excluded.data",
+            [&auto.id, &json],
+        )?;
+        Ok(())
+    })?;
 
     Ok(auto)
 }
 
 #[tauri::command]
-pub async fn delete_automation(app: tauri::AppHandle, automation_id: String) -> Result<(), String> {
-    let store = app.store("flox_store.bin").map_err(|e| e.to_string())?;
-
-    let mut automations: Vec<Automation> = store
-        .get("automations")
-        .and_then(|v| serde_json::from_value(v).ok())
-        .unwrap_or_default();
-
-    automations.retain(|a| a.id != automation_id);
-
-    store.set(
-        "automations",
-        serde_json::to_value(&automations).map_err(|e| e.to_string())?,
-    );
-    store.save().map_err(|e| e.to_string())?;
-
-    Ok(())
+pub async fn delete_automation(_app: tauri::AppHandle, automation_id: String) -> Result<(), String> {
+    db::with_conn(|conn| {
+        conn.execute("DELETE FROM automations WHERE id = ?1", [&automation_id])?;
+        Ok(())
+    })
 }
 
 #[tauri::command]
 pub async fn toggle_automation(
-    app: tauri::AppHandle,
+    _app: tauri::AppHandle,
     automation_id: String,
     enabled: bool,
 ) -> Result<(), String> {
-    let store = app.store("flox_store.bin").map_err(|e| e.to_string())?;
-
-    let mut automations: Vec<Automation> = store
-        .get("automations")
-        .and_then(|v| serde_json::from_value(v).ok())
-        .unwrap_or_default();
+    let mut automations = get_all_automations()?;
 
     if let Some(auto) = automations.iter_mut().find(|a| a.id == automation_id) {
         auto.enabled = enabled;
-
         if enabled {
-            let next_run = chrono::Utc::now() + chrono::Duration::minutes(auto.interval_minutes as i64);
+            let next_run =
+                chrono::Utc::now() + chrono::Duration::minutes(auto.interval_minutes as i64);
             auto.next_run = Some(next_run.to_rfc3339());
         } else {
             auto.next_run = None;
         }
+        let json = serde_json::to_string(auto).map_err(|e| e.to_string())?;
+        let id = auto.id.clone();
+        db::with_conn(|conn| {
+            conn.execute(
+                "UPDATE automations SET data = ?1 WHERE id = ?2",
+                [&json, &id],
+            )?;
+            Ok(())
+        })?;
     }
-
-    store.set(
-        "automations",
-        serde_json::to_value(&automations).map_err(|e| e.to_string())?,
-    );
-    store.save().map_err(|e| e.to_string())?;
 
     Ok(())
 }
 
 #[tauri::command]
-pub async fn run_automation_now(
-    app: tauri::AppHandle,
-    automation_id: String,
-) -> Result<(), String> {
-    let store = app.store("flox_store.bin").map_err(|e| e.to_string())?;
-
-    let automations: Vec<Automation> = store
-        .get("automations")
-        .and_then(|v| serde_json::from_value(v).ok())
-        .unwrap_or_default();
-
+pub async fn run_automation_now(app: tauri::AppHandle, automation_id: String) -> Result<(), String> {
+    let automations = get_all_automations()?;
     let automation = automations
         .into_iter()
         .find(|a| a.id == automation_id)
-        .ok_or_else(|| "Automation not found".to_string())?;
+        .ok_or("Automation not found")?;
 
-    let settings: AppSettings = store
-        .get("settings")
-        .and_then(|v| serde_json::from_value(v).ok())
-        .unwrap_or_default();
+    let settings = crate::settings::get_settings(app.clone()).await?;
 
-    let app_clone = app.clone();
     tokio::spawn(async move {
-        execute_automation(app_clone, automation, settings).await;
+        execute_automation(app, automation, settings).await;
     });
 
     Ok(())
 }
 
 #[tauri::command]
-pub async fn get_automation_logs(app: tauri::AppHandle) -> Result<Vec<AutomationLog>, String> {
-    let store = app.store("flox_store.bin").map_err(|e| e.to_string())?;
-    let logs: Vec<AutomationLog> = store
-        .get("automation_logs")
-        .and_then(|v| serde_json::from_value(v).ok())
-        .unwrap_or_default();
-    Ok(logs)
+pub async fn get_automation_logs(_app: tauri::AppHandle) -> Result<Vec<AutomationLog>, String> {
+    db::with_conn(|conn| {
+        let mut stmt = conn.prepare(
+            "SELECT id, automation_id, timestamp, status, summary, steps
+             FROM automation_logs ORDER BY timestamp DESC LIMIT 100",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok(AutomationLog {
+                id: row.get(0)?,
+                automation_id: row.get(1)?,
+                timestamp: row.get(2)?,
+                status: row.get(3)?,
+                summary: row.get(4)?,
+                steps: row.get::<_, i64>(5)? as u32,
+            })
+        })?;
+        rows.collect()
+    })
 }
 
 #[tauri::command]
-pub async fn clear_automation_logs(app: tauri::AppHandle) -> Result<(), String> {
-    let store = app.store("flox_store.bin").map_err(|e| e.to_string())?;
-    store.set("automation_logs", serde_json::json!([]));
-    store.save().map_err(|e| e.to_string())?;
-    Ok(())
+pub async fn clear_automation_logs(_app: tauri::AppHandle) -> Result<(), String> {
+    db::with_conn(|conn| {
+        conn.execute("DELETE FROM automation_logs", [])?;
+        Ok(())
+    })
 }
+
+// ---------------------------------------------------------------------------
+// Scheduler
+// ---------------------------------------------------------------------------
 
 pub async fn start_automation_scheduler(app: tauri::AppHandle) {
     let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(60));
@@ -181,20 +166,15 @@ pub async fn start_automation_scheduler(app: tauri::AppHandle) {
     loop {
         interval.tick().await;
 
-        let store = match app.store("flox_store.bin") {
-            Ok(s) => s,
+        let automations = match get_all_automations() {
+            Ok(a) => a,
             Err(_) => continue,
         };
 
-        let automations: Vec<Automation> = store
-            .get("automations")
-            .and_then(|v| serde_json::from_value(v).ok())
-            .unwrap_or_default();
-
-        let settings: AppSettings = store
-            .get("settings")
-            .and_then(|v| serde_json::from_value(v).ok())
-            .unwrap_or_default();
+        let settings = match crate::settings::get_settings(app.clone()).await {
+            Ok(s) => s,
+            Err(_) => AppSettings::default(),
+        };
 
         let now = chrono::Utc::now();
 
@@ -203,7 +183,8 @@ pub async fn start_automation_scheduler(app: tauri::AppHandle) {
                 continue;
             }
 
-            let should_run = automation.next_run
+            let should_run = automation
+                .next_run
                 .as_deref()
                 .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
                 .map(|next| now >= next)
@@ -222,35 +203,53 @@ pub async fn start_automation_scheduler(app: tauri::AppHandle) {
     }
 }
 
-async fn execute_automation(
-    app: tauri::AppHandle,
-    automation: Automation,
-    settings: AppSettings,
-) {
+// ---------------------------------------------------------------------------
+// Internal helpers
+// ---------------------------------------------------------------------------
+
+fn get_all_automations() -> Result<Vec<Automation>, String> {
+    db::with_conn(|conn| {
+        let mut stmt = conn.prepare("SELECT data FROM automations ORDER BY rowid")?;
+        let rows = stmt.query_map([], |row| {
+            let json: String = row.get(0)?;
+            serde_json::from_str(&json)
+                .map_err(|e| rusqlite::Error::InvalidParameterName(e.to_string()))
+        })?;
+        rows.collect()
+    })
+}
+
+async fn execute_automation(app: tauri::AppHandle, automation: Automation, settings: AppSettings) {
     let session_id = format!("automation_{}", automation.id);
-    let browser_path = automation.browser_path
+    let browser_path = automation
+        .browser_path
         .clone()
         .or_else(|| settings.preferred_browser.clone())
         .unwrap_or_default();
 
-    let _ = app.emit("automation_started", serde_json::json!({
-        "automation_id": automation.id,
-        "name": automation.name
-    }));
+    let _ = app.emit(
+        "automation_started",
+        serde_json::json!({
+            "automation_id": automation.id,
+            "name": automation.name
+        }),
+    );
 
-    // Launch browser in headless mode for automations
-    let launch_result = crate::browser::launch_browser(
-        browser_path,
-        true,  // headless
-        session_id.clone(),
-    ).await;
+    let launch_result =
+        crate::browser::launch_browser(browser_path, true, session_id.clone()).await;
 
     if let Err(e) = launch_result {
-        log_automation_result(&app, &automation, "error", &format!("Failed to launch browser: {}", e), 0).await;
+        persist_automation_result(
+            &app,
+            &automation,
+            "error",
+            &format!("Failed to launch browser: {}", e),
+            0,
+        )
+        .await;
         return;
     }
 
-    // Run the agent task
     let task_id = format!("automation_task_{}", Uuid::new_v4());
     let result = crate::agents::run_agent_task(
         app.clone(),
@@ -258,104 +257,94 @@ async fn execute_automation(
         automation.prompt.clone(),
         session_id.clone(),
         settings,
-    ).await;
+        None,
+    )
+    .await;
 
     let (status, summary, steps) = match result {
         Ok(task) => {
-            let steps = task.steps.len() as u32;
-            let summary = format!("Completed with {} steps (status: {})", steps, task.status);
-            ("success".to_string(), summary, steps)
+            let n = task.steps.len() as u32;
+            (
+                "success".to_string(),
+                format!("Completed with {} steps (status: {})", n, task.status),
+                n,
+            )
         }
         Err(e) => ("error".to_string(), e, 0),
     };
 
-    // Close browser
     let _ = crate::browser::close_browser(session_id).await;
+    update_automation_run(&app, &automation, &status, &summary, steps).await;
 
-    // Update next run time and log result
-    update_automation_run(&app, &automation.id, &status, &summary, steps).await;
-
-    let _ = app.emit("automation_completed", serde_json::json!({
-        "automation_id": automation.id,
-        "name": automation.name,
-        "status": status,
-        "summary": summary
-    }));
+    let _ = app.emit(
+        "automation_completed",
+        serde_json::json!({
+            "automation_id": automation.id,
+            "name": automation.name,
+            "status": status,
+            "summary": summary
+        }),
+    );
 }
 
-async fn log_automation_result(
+async fn persist_automation_result(
+    _app: &tauri::AppHandle,
+    automation: &Automation,
+    status: &str,
+    summary: &str,
+    steps: u32,
+) {
+    let log_id = Uuid::new_v4().to_string();
+    let _ = db::with_conn(|conn| {
+        conn.execute(
+            "INSERT INTO automation_logs (id, automation_id, timestamp, status, summary, steps)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            rusqlite::params![
+                log_id,
+                automation.id,
+                chrono::Utc::now().to_rfc3339(),
+                status,
+                summary,
+                steps as i64,
+            ],
+        )?;
+        Ok(())
+    });
+}
+
+async fn update_automation_run(
     app: &tauri::AppHandle,
     automation: &Automation,
     status: &str,
     summary: &str,
     steps: u32,
 ) {
-    let store = match app.store("flox_store.bin") {
-        Ok(s) => s,
+    let mut automations = match get_all_automations() {
+        Ok(a) => a,
         Err(_) => return,
     };
 
-    let log = AutomationLog {
-        automation_id: automation.id.clone(),
-        timestamp: chrono::Utc::now().to_rfc3339(),
-        status: status.to_string(),
-        summary: summary.to_string(),
-        steps,
-    };
-
-    let mut logs: Vec<AutomationLog> = store
-        .get("automation_logs")
-        .and_then(|v| serde_json::from_value(v).ok())
-        .unwrap_or_default();
-
-    logs.insert(0, log);
-    logs.truncate(100); // Keep last 100 logs
-
-    if let Ok(v) = serde_json::to_value(&logs) {
-        store.set("automation_logs", v);
-        let _ = store.save();
-    }
-}
-
-async fn update_automation_run(
-    app: &tauri::AppHandle,
-    automation_id: &str,
-    status: &str,
-    summary: &str,
-    steps: u32,
-) {
-    let store = match app.store("flox_store.bin") {
-        Ok(s) => s,
-        Err(_) => return,
-    };
-
-    let mut automations: Vec<Automation> = store
-        .get("automations")
-        .and_then(|v| serde_json::from_value(v).ok())
-        .unwrap_or_default();
-
-    if let Some(auto) = automations.iter_mut().find(|a| a.id == automation_id) {
+    if let Some(auto) = automations.iter_mut().find(|a| a.id == automation.id) {
         auto.last_run = Some(chrono::Utc::now().to_rfc3339());
         auto.last_result = Some(format!("{}: {}", status, summary));
 
         if auto.enabled {
-            let next_run = chrono::Utc::now() + chrono::Duration::minutes(auto.interval_minutes as i64);
+            let next_run =
+                chrono::Utc::now() + chrono::Duration::minutes(auto.interval_minutes as i64);
             auto.next_run = Some(next_run.to_rfc3339());
+        }
+
+        if let Ok(json) = serde_json::to_string(auto) {
+            let id = auto.id.clone();
+            let _ = db::with_conn(|conn| {
+                conn.execute(
+                    "UPDATE automations SET data = ?1 WHERE id = ?2",
+                    [&json, &id],
+                )?;
+                Ok(())
+            });
         }
     }
 
-    if let Ok(v) = serde_json::to_value(&automations) {
-        store.set("automations", v);
-        let _ = store.save();
-    }
-
-    // Also log
-    let automations_for_log: Vec<Automation> = store
-        .get("automations")
-        .and_then(|v| serde_json::from_value(v).ok())
-        .unwrap_or_default();
-
-    if let Some(automation) = automations_for_log.iter().find(|a| a.id == automation_id) {
-        log_automation_result(app, automation, status, summary, steps).await;
-    }
+    persist_automation_result(app, automation, status, summary, steps).await;
 }
