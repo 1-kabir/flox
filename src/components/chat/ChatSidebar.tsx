@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Plus, MessageSquare, Trash2 } from 'lucide-react';
+import { invoke } from '@tauri-apps/api/core';
 import { useAppStore } from '../../store';
 import { cn, generateId, formatRelativeTime, truncate } from '../../lib/utils';
 import type { Conversation } from '../../types';
@@ -10,7 +11,7 @@ export const ChatSidebar: React.FC = () => {
     activeConversationId,
     setActiveConversation,
     addConversation,
-    setConversations,
+    deleteConversation: storeDeleteConversation,
   } = useAppStore();
 
   const createNewConversation = () => {
@@ -22,25 +23,31 @@ export const ChatSidebar: React.FC = () => {
     };
     addConversation(conv);
     setActiveConversation(conv.id);
+    // Persist immediately
+    invoke('save_conversation', {
+      conversation: {
+        id: conv.id,
+        title: conv.title,
+        created_at: conv.created_at,
+        session_id: null,
+        browser_path: null,
+      },
+    }).catch(console.error);
   };
 
   const deleteConversation = (e: React.MouseEvent, id: string) => {
     e.stopPropagation();
-    const { conversations: convs, activeConversationId: activeId, setActiveConversation: setActive } = useAppStore.getState();
-    const filtered = convs.filter((c) => c.id !== id);
-    setConversations(filtered);
-    if (activeId === id) {
-      setActive(filtered[0]?.id ?? null);
-    }
+    storeDeleteConversation(id);
+    invoke('delete_conversation', { conversationId: id }).catch(console.error);
   };
 
   return (
-    <div className="w-64 flex flex-col border-r border-gray-800 bg-gray-950">
-      <div className="p-4 flex items-center justify-between border-b border-gray-800">
-        <h2 className="text-sm font-semibold text-gray-200">Conversations</h2>
+    <div className="w-64 flex flex-col border-r border-[#1a1a1a] bg-[#000000]">
+      <div className="p-4 flex items-center justify-between border-b border-[#1a1a1a]">
+        <h2 className="text-sm font-semibold text-white">Conversations</h2>
         <button
           onClick={createNewConversation}
-          className="w-8 h-8 flex items-center justify-center rounded-lg bg-violet-600 hover:bg-violet-700 text-white transition-colors"
+          className="w-8 h-8 flex items-center justify-center rounded-lg bg-violet-600 hover:bg-violet-500 text-white transition-colors"
         >
           <Plus className="w-4 h-4" />
         </button>
@@ -48,7 +55,7 @@ export const ChatSidebar: React.FC = () => {
 
       <div className="flex-1 overflow-y-auto p-2 space-y-1">
         {conversations.length === 0 && (
-          <div className="text-center text-gray-600 text-sm py-8">
+          <div className="text-center text-[#606060] text-sm py-8">
             <MessageSquare className="w-8 h-8 mx-auto mb-2 opacity-50" />
             <p>No conversations yet</p>
             <p className="text-xs mt-1">Click + to start</p>

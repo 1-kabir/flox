@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
-use tauri_plugin_store::StoreExt;
+
+use crate::db;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ModelConfig {
@@ -20,6 +21,8 @@ pub struct AppSettings {
     pub headless_mode: bool,
     pub theme: String,
     pub screenshots_enabled: bool,
+    pub planner_vision: bool,
+    pub navigator_vision: bool,
     pub max_steps: u32,
     pub timeout_seconds: u32,
 }
@@ -55,6 +58,8 @@ impl Default for AppSettings {
             headless_mode: false,
             theme: "dark".to_string(),
             screenshots_enabled: true,
+            planner_vision: false,
+            navigator_vision: true,
             max_steps: 50,
             timeout_seconds: 300,
         }
@@ -62,26 +67,31 @@ impl Default for AppSettings {
 }
 
 #[tauri::command]
-pub async fn get_settings(app: tauri::AppHandle) -> Result<AppSettings, String> {
-    let store = app.store("flox_store.bin").map_err(|e| e.to_string())?;
-
-    let settings = store
-        .get("settings")
-        .and_then(|v| serde_json::from_value(v).ok())
-        .unwrap_or_default();
-
-    Ok(settings)
+pub async fn get_settings(_app: tauri::AppHandle) -> Result<AppSettings, String> {
+    db::with_conn(|conn| {
+        let result: rusqlite::Result<String> = conn.query_row(
+            "SELECT value FROM settings WHERE key = 'settings'",
+            [],
+            |row| row.get(0),
+        );
+        match result {
+            Ok(json) => serde_json::from_str(&json)
+                .map_err(|e| rusqlite::Error::InvalidParameterName(e.to_string())),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(AppSettings::default()),
+            Err(e) => Err(e),
+        }
+    })
 }
 
 #[tauri::command]
-pub async fn save_settings(app: tauri::AppHandle, settings: AppSettings) -> Result<(), String> {
-    let store = app.store("flox_store.bin").map_err(|e| e.to_string())?;
-
-    store.set(
-        "settings",
-        serde_json::to_value(&settings).map_err(|e| e.to_string())?,
-    );
-    store.save().map_err(|e| e.to_string())?;
-
-    Ok(())
+pub async fn save_settings(_app: tauri::AppHandle, settings: AppSettings) -> Result<(), String> {
+    let json = serde_json::to_string(&settings).map_err(|e| e.to_string())?;
+    db::with_conn(|conn| {
+        conn.execute(
+            "INSERT INTO settings (key, value) VALUES ('settings', ?1)
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            [&json],
+        )?;
+        Ok(())
+    })
 }
