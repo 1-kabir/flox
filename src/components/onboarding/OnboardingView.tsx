@@ -159,7 +159,7 @@ export const OnboardingView: React.FC = () => {
                 <CheckCircle className="w-4 h-4 mt-0.5 text-green-400" />
                 <div className="flex items-center gap-2 text-sm text-[#a0a0a0]">
                   <Globe className="w-4 h-4" />
-                  Node.js 18+ (required for development builds)
+                  Node.js 18+ (only needed for building from source)
                 </div>
               </div>
             </div>

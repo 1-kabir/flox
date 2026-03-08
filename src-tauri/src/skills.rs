@@ -162,7 +162,7 @@ pub async fn toggle_skill(
 
 /// Returns automation names and conversation titles that reference this skill.
 /// Matches are keyword-based: the skill's trigger keywords are searched in
-/// automation prompts and conversation message content / agent_steps data.
+/// automation prompts and conversation message content.
 #[tauri::command]
 pub async fn get_skill_usage(
     _app: tauri::AppHandle,
@@ -188,6 +188,7 @@ pub async fn get_skill_usage(
         });
     }
 
+    // Check automations whose prompt contains any trigger keyword.
     let automations = db::with_conn(|conn| {
         let mut stmt = conn.prepare("SELECT data FROM automations ORDER BY rowid")?;
         let rows: Vec<String> = stmt
@@ -211,44 +212,45 @@ pub async fn get_skill_usage(
         })
         .collect();
 
-    // Find conversations where any message content references the skill's keywords.
-    let matching_conversations: Vec<String> = db::with_conn(|conn| {
+    // Fetch all (conversation_id, title, message_content) rows in one query,
+    // then filter by keyword in Rust. Deduplicate by conversation id.
+    let conv_rows: Vec<(String, String, String)> = db::with_conn(|conn| {
         let mut stmt = conn.prepare(
-            "SELECT DISTINCT c.title
+            "SELECT c.id, c.title, m.content
              FROM conversations c
-             JOIN messages m ON m.conversation_id = c.id",
+             JOIN messages m ON m.conversation_id = c.id
+             ORDER BY c.id",
         )?;
-        let rows: Vec<(String, String)> = stmt
-            .query_map([], |row| Ok((row.get::<_, String>(0)?, String::new())))?
+        let rows = stmt
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
+            })?
             .filter_map(|r| r.ok())
             .collect();
         Ok(rows)
-    })
-    .unwrap_or_default()
-    .into_iter()
-    .filter_map(|(title, _)| {
-        // Fetch messages for each conversation and check content.
-        let found = db::with_conn(|conn| {
-            let mut stmt = conn.prepare(
-                "SELECT content FROM messages WHERE conversation_id IN (
-                     SELECT id FROM conversations WHERE title = ?1
-                 )",
-            )?;
-            let contents: Vec<String> = stmt
-                .query_map([&title], |row| row.get::<_, String>(0))?
-                .filter_map(|r| r.ok())
-                .collect();
-            Ok(contents)
-        })
-        .unwrap_or_default();
+    })?;
 
-        let matched = found.iter().any(|content| {
+    // Group by conversation id and collect matching conversation titles.
+    let mut seen_ids: Vec<String> = Vec::new();
+    let matching_conversations: Vec<String> = conv_rows
+        .iter()
+        .filter_map(|(id, title, content)| {
+            if seen_ids.contains(id) {
+                return None;
+            }
             let lower = content.to_lowercase();
-            keywords.iter().any(|kw| lower.contains(kw.as_str()))
-        });
-        if matched { Some(title) } else { None }
-    })
-    .collect();
+            if keywords.iter().any(|kw| lower.contains(kw.as_str())) {
+                seen_ids.push(id.clone());
+                Some(title.clone())
+            } else {
+                None
+            }
+        })
+        .collect();
 
     Ok(SkillUsage {
         automations: matching_automations,

@@ -435,8 +435,8 @@ const SkillCard: React.FC<SkillCardProps> = ({
                       {usage.automations.length > 0 && (
                         <div>
                           <p className="text-xs text-[#606060] mb-0.5">Automations:</p>
-                          {usage.automations.map((name) => (
-                            <span key={name} className="inline-flex items-center gap-1 mr-1.5 px-2 py-0.5 rounded-lg text-xs bg-[#1a1a1a] text-[#a0a0a0]">
+                          {usage.automations.map((name, i) => (
+                            <span key={`auto-${i}-${name}`} className="inline-flex items-center gap-1 mr-1.5 px-2 py-0.5 rounded-lg text-xs bg-[#1a1a1a] text-[#a0a0a0]">
                               <CheckCircle className="w-3 h-3 text-violet-400" />
                               {name}
                             </span>
@@ -446,8 +446,8 @@ const SkillCard: React.FC<SkillCardProps> = ({
                       {usage.conversations.length > 0 && (
                         <div>
                           <p className="text-xs text-[#606060] mb-0.5">Conversations:</p>
-                          {usage.conversations.map((title) => (
-                            <span key={title} className="inline-flex items-center gap-1 mr-1.5 px-2 py-0.5 rounded-lg text-xs bg-[#1a1a1a] text-[#a0a0a0]">
+                          {usage.conversations.map((title, i) => (
+                            <span key={`conv-${i}-${title}`} className="inline-flex items-center gap-1 mr-1.5 px-2 py-0.5 rounded-lg text-xs bg-[#1a1a1a] text-[#a0a0a0]">
                               <CheckCircle className="w-3 h-3 text-violet-400" />
                               {title}
                             </span>

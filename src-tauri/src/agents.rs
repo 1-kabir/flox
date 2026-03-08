@@ -412,12 +412,14 @@ pub async fn run_agent_task(
                         HilRoutingMode::None => false,
                         // All: ask whenever verifier rejects
                         HilRoutingMode::All => !verified,
-                        // Auto: ask only for destructive actions or when no similar prior approval exists
+                        // Auto: destructive actions always escalate regardless of verifier result;
+                        // otherwise let verifier approval stand; only escalate on verifier rejection
+                        // if no similar prior action was approved.
                         HilRoutingMode::Auto => {
-                            if verified {
-                                false
-                            } else if is_destructive_action(&action) {
+                            if is_destructive_action(&action) {
                                 true
+                            } else if verified {
+                                false
                             } else {
                                 !has_similar_prior_approval(&approval_history, &action)
                             }
@@ -462,7 +464,7 @@ pub async fn run_agent_task(
 
                         if !human_approved {
                             denial_streak += 1;
-                            let retry_msg = if settings.auto_try_alternatives && denial_streak <= 2 {
+                            let retry_msg = if settings.auto_try_alternatives && denial_streak <= MAX_AUTO_RETRY_ATTEMPTS {
                                 "Action was rejected. Please try a different approach (auto-retry)."
                             } else {
                                 "Action was rejected. Please choose a safer alternative."
@@ -475,7 +477,7 @@ pub async fn run_agent_task(
                                 role: "user".to_string(),
                                 content: retry_msg.to_string(),
                             });
-                            if !settings.auto_try_alternatives || denial_streak > 2 {
+                            if !settings.auto_try_alternatives || denial_streak > MAX_AUTO_RETRY_ATTEMPTS {
                                 denial_streak = 0;
                             }
                             continue;
@@ -863,6 +865,8 @@ async fn call_llm_with_retry(
     }
 }
 
+/// Maximum consecutive denials before auto-retry is exhausted (used with `auto_try_alternatives`).
+const MAX_AUTO_RETRY_ATTEMPTS: u32 = 2;
 /// Maximum exponential backoff wait before an LLM retry (seconds).
 const MAX_BACKOFF_SECS: u64 = 30;
 /// Maximum message content length before truncation on HTTP 413 retry.
