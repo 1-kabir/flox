@@ -31,7 +31,16 @@ const defaultSettings: AppSettings = {
   navigator_vision: true,
   max_steps: 50,
   timeout_seconds: 300,
+  hil_routing_mode: 'all',
+  auto_try_alternatives: false,
+  onboarding_complete: false,
 };
+
+export interface Toast {
+  id: string;
+  message: string;
+  severity: 'success' | 'warning' | 'error';
+}
 
 interface AppState {
   // Theme
@@ -95,6 +104,11 @@ interface AppState {
   // Network status
   isOnline: boolean;
   setIsOnline: (online: boolean) => void;
+
+  // Toasts
+  toasts: Toast[];
+  addToast: (message: string, severity: Toast['severity']) => void;
+  removeToast: (id: string) => void;
 }
 
 export const useAppStore = create<AppState>((set) => ({
@@ -191,4 +205,15 @@ export const useAppStore = create<AppState>((set) => ({
 
   isOnline: true,
   setIsOnline: (online) => set({ isOnline: online }),
+
+  toasts: [],
+  addToast: (message, severity) =>
+    set((state) => ({
+      toasts: [
+        ...state.toasts,
+        { id: `${Date.now()}-${Math.random()}`, message, severity },
+      ],
+    })),
+  removeToast: (id) =>
+    set((state) => ({ toasts: state.toasts.filter((t) => t.id !== id) })),
 }));

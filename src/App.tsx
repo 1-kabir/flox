@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { useAppStore } from './store';
@@ -8,7 +8,9 @@ import { SettingsView } from './components/settings/SettingsView';
 import { AutomationsView } from './components/automations/AutomationsView';
 import { LogsView } from './components/activity/LogsView';
 import { SkillsView } from './components/skills/SkillsView';
+import { OnboardingView } from './components/onboarding/OnboardingView';
 import { ApprovalModal } from './components/chat/ApprovalModal';
+import { ToastContainer } from './components/ui/Toast';
 import { cn } from './lib/utils';
 import type { AppSettings, BrowserInfo, Automation, ApprovalRequest, Skill, Message } from './types';
 
@@ -25,6 +27,7 @@ export default function App() {
   const {
     theme,
     activeTab,
+    settings,
     setSettings,
     setBrowsers,
     setAutomations,
@@ -33,13 +36,18 @@ export default function App() {
     updateAutomation,
     addApproval,
     setIsOnline,
+    isOnline,
+    addToast,
   } = useAppStore();
+
+  // Track whether we already showed the "no browser" warning this session.
+  const browserWarningShown = useRef(false);
 
   // Load settings, browsers, automations, conversations (with messages), and skills on mount
   useEffect(() => {
     const init = async () => {
       try {
-        const [settings, browsers, automations, convRecords, skillsList] = await Promise.all([
+        const [loadedSettings, detectedBrowsers, automations, convRecords, skillsList] = await Promise.all([
           invoke<AppSettings>('get_settings'),
           invoke<BrowserInfo[]>('detect_browsers'),
           invoke<Automation[]>('get_automations'),
@@ -47,10 +55,18 @@ export default function App() {
           invoke<Skill[]>('get_skills'),
         ]);
 
-        setSettings(settings);
-        setBrowsers(browsers);
+        setSettings(loadedSettings);
+        setBrowsers(detectedBrowsers);
         setAutomations(automations);
         setSkills(skillsList);
+
+        if (detectedBrowsers.length === 0 && !browserWarningShown.current) {
+          browserWarningShown.current = true;
+          addToast(
+            'No supported browser detected. Please install Chrome, Edge, Brave, or Vivaldi.',
+            'error'
+          );
+        }
 
         // Eagerly load messages for every conversation so the chat history is
         // immediately available when the user opens a conversation.
@@ -78,7 +94,7 @@ export default function App() {
       }
     };
     init();
-  }, [setSettings, setBrowsers, setAutomations, setConversations, setSkills]);
+  }, [setSettings, setBrowsers, setAutomations, setConversations, setSkills, addToast]);
 
   // Poll network status every 10 seconds
   useEffect(() => {
@@ -124,7 +140,33 @@ export default function App() {
     };
   }, [addApproval]);
 
+  // Listen for backend error events and show toasts.
+  useEffect(() => {
+    const unlisten = listen<{ message: string; severity: 'success' | 'warning' | 'error' }>(
+      'flox://error',
+      (event) => {
+        addToast(event.payload.message, event.payload.severity ?? 'error');
+      }
+    );
+    return () => {
+      unlisten.then((fn) => fn());
+    };
+  }, [addToast]);
+
+  // Warn when offline state changes to offline.
+  const prevOnlineRef = useRef(isOnline);
+  useEffect(() => {
+    if (prevOnlineRef.current && !isOnline) {
+      addToast(
+        'You appear to be offline. Agent tasks require internet access.',
+        'warning'
+      );
+    }
+    prevOnlineRef.current = isOnline;
+  }, [isOnline, addToast]);
+
   const isDark = theme === 'dark';
+  const showOnboarding = !settings.onboarding_complete;
 
   return (
     <div
@@ -133,17 +175,27 @@ export default function App() {
         isDark ? 'dark bg-[#000000] text-white' : 'light bg-gray-50 text-gray-900'
       )}
     >
-      <Sidebar />
-      <main className="flex flex-1 overflow-hidden">
-        {activeTab === 'chat' && <ChatView />}
-        {activeTab === 'settings' && <SettingsView />}
-        {activeTab === 'automations' && <AutomationsView />}
-        {activeTab === 'logs' && <LogsView />}
-        {activeTab === 'skills' && <SkillsView />}
-      </main>
+      {showOnboarding ? (
+        <OnboardingView />
+      ) : (
+        <>
+          <Sidebar />
+          <main className="flex flex-1 overflow-hidden">
+            {activeTab === 'chat' && <ChatView />}
+            {activeTab === 'settings' && <SettingsView />}
+            {activeTab === 'automations' && <AutomationsView />}
+            {activeTab === 'logs' && <LogsView />}
+            {activeTab === 'skills' && <SkillsView />}
+          </main>
 
-      {/* Human-in-the-loop approval modal */}
-      <ApprovalModal />
+          {/* Human-in-the-loop approval modal */}
+          <ApprovalModal />
+        </>
+      )}
+
+      {/* Toast notifications */}
+      <ToastContainer />
     </div>
   );
 }
+

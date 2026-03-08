@@ -30,6 +30,8 @@ export const ChatView: React.FC = () => {
     setCurrentTaskId,
     setCurrentScreenshot,
     skills,
+    isOnline,
+    addToast,
   } = useAppStore();
 
   const [input, setInput] = useState('');
@@ -125,6 +127,19 @@ export const ChatView: React.FC = () => {
 
   const handleSend = useCallback(async () => {
     if (!input.trim() || isAgentRunning) return;
+
+    // Guard: warn if offline
+    if (!isOnline) {
+      addToast('You appear to be offline. Agent tasks require internet access.', 'warning');
+    }
+
+    // Guard: warn if API key is missing
+    const hasApiKey =
+      settings.planner_model.api_key.trim().length > 0 ||
+      settings.planner_model.provider === 'ollama';
+    if (!hasApiKey) {
+      addToast('API key not configured. Go to Settings to add your key.', 'warning');
+    }
 
     const userInput = input.trim();
     setInput('');
@@ -226,6 +241,9 @@ export const ChatView: React.FC = () => {
       // Reset skill selection after task
       setSelectedSkillIds([]);
     } catch (error) {
+      const errStr = String(error);
+      const truncated = errStr.length > 120 ? `${errStr.slice(0, 120)}…` : errStr;
+      addToast(truncated, 'error');
       const errMsg: Message = {
         id: generateId(),
         role: 'assistant',
@@ -250,6 +268,8 @@ export const ChatView: React.FC = () => {
     headless,
     settings,
     selectedSkillIds,
+    isOnline,
+    addToast,
     addConversation,
     setActiveConversation,
     addMessage,

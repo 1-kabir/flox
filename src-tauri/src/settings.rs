@@ -12,6 +12,19 @@ pub struct ModelConfig {
     pub max_tokens: u32,
 }
 
+/// Controls how risky browser actions are routed for human review.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum HilRoutingMode {
+    /// Every risky action requires human approval (default).
+    #[default]
+    All,
+    /// All actions are auto-approved; no human intervention.
+    None,
+    /// AI verifier decides; only uncertain/destructive actions reach the human.
+    Auto,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppSettings {
     pub planner_model: ModelConfig,
@@ -25,6 +38,15 @@ pub struct AppSettings {
     pub navigator_vision: bool,
     pub max_steps: u32,
     pub timeout_seconds: u32,
+    /// How risky actions are routed for human-in-the-loop review.
+    #[serde(default)]
+    pub hil_routing_mode: HilRoutingMode,
+    /// If true, agents automatically retry with a different strategy when an action is denied.
+    #[serde(default)]
+    pub auto_try_alternatives: bool,
+    /// Whether the user has completed the first-run onboarding flow.
+    #[serde(default)]
+    pub onboarding_complete: bool,
 }
 
 impl Default for AppSettings {
@@ -62,6 +84,9 @@ impl Default for AppSettings {
             navigator_vision: true,
             max_steps: 50,
             timeout_seconds: 300,
+            hil_routing_mode: HilRoutingMode::All,
+            auto_try_alternatives: false,
+            onboarding_complete: false,
         }
     }
 }

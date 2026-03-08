@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex};
 use once_cell::sync::Lazy;
 use tauri::Emitter;
 
-use crate::settings::{AppSettings, ModelConfig};
+use crate::settings::{AppSettings, HilRoutingMode, ModelConfig};
 use crate::browser::{BrowserAction, ActionResult};
 use crate::network;
 
@@ -102,6 +102,56 @@ fn risk_hint(action: &BrowserAction) -> Option<String> {
         "evaluate" => Some("Executing arbitrary JavaScript".to_string()),
         _ => None,
     }
+}
+
+/// Returns `true` if the action is considered destructive/high-risk and must always
+/// be escalated to a human regardless of HIL routing mode.
+fn is_destructive_action(action: &BrowserAction) -> bool {
+    match action.action_type.as_str() {
+        "navigate" => {
+            let destructive = ["delete", "remove", "cancel", "payment", "checkout", "pay"];
+            action.url.as_deref().map(|u| {
+                let l = u.to_lowercase();
+                destructive.iter().any(|p| l.contains(p))
+            }).unwrap_or(false)
+        }
+        "click" => {
+            let destructive_text = [
+                "delete", "pay", "confirm payment", "submit order", "cancel subscription",
+            ];
+            let target = action.selector.as_deref().unwrap_or("").to_lowercase();
+            let value = action.value.as_deref().unwrap_or("").to_lowercase();
+            destructive_text.iter().any(|p| target.contains(p) || value.contains(p))
+        }
+        _ => false,
+    }
+}
+
+/// A record of a past approval/denial decision used for the rolling context window
+/// in `HilRoutingMode::Auto`.
+#[derive(Clone)]
+struct ApprovalRecord {
+    action_type: String,
+    selector_or_url: String,
+    approved: bool,
+}
+
+/// Returns `true` if a structurally similar action was previously approved in the
+/// rolling window (used by `HilRoutingMode::Auto` to skip human review).
+fn has_similar_prior_approval(history: &[ApprovalRecord], action: &BrowserAction) -> bool {
+    let target = match action.action_type.as_str() {
+        "navigate" => action.url.as_deref().unwrap_or("").to_lowercase(),
+        _ => action.selector.as_deref().unwrap_or("").to_lowercase(),
+    };
+    history.iter().any(|r| {
+        r.approved
+            && r.action_type == action.action_type
+            && !r.selector_or_url.is_empty()
+            && !target.is_empty()
+            && (r.selector_or_url == target
+                || r.selector_or_url.contains(target.as_str())
+                || target.contains(r.selector_or_url.as_str()))
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -215,6 +265,10 @@ pub async fn run_agent_task(
 
     let max_steps = settings.max_steps as usize;
     let mut last_url: Option<String> = None;
+    // Rolling window of the last 20 approval decisions (used by Auto mode).
+    let mut approval_history: Vec<ApprovalRecord> = Vec::new();
+    // Tracks consecutive denials for auto_try_alternatives logic.
+    let mut denial_streak: u32 = 0;
 
     for step_num in 0..max_steps {
         {
@@ -315,39 +369,64 @@ pub async fn run_agent_task(
                 if let Some(action) = maybe_action {
                     let hint = risk_hint(&action);
 
-                    // VERIFICATION PHASE
-                    let verification = call_verifier(
-                        &settings.verifier_model,
-                        &objective,
-                        &thought,
-                        &action,
-                        hint.as_deref(),
-                        &skill_permissions,
-                    )
-                    .await;
+                    // -------------------------------------------------------
+                    // HIL routing: None → skip verifier + human entirely.
+                    // All / Auto → run verifier.
+                    // -------------------------------------------------------
+                    let (verified, verify_reason) = if settings.hil_routing_mode == HilRoutingMode::None {
+                        (true, String::new())
+                    } else {
+                        // VERIFICATION PHASE
+                        let verification = call_verifier(
+                            &settings.verifier_model,
+                            &objective,
+                            &thought,
+                            &action,
+                            hint.as_deref(),
+                            &skill_permissions,
+                            &approval_history,
+                        )
+                        .await;
 
-                    let (verified, verify_reason) = match &verification {
-                        Ok((approved, reason)) => {
-                            emit_progress(&app, &task_id, "verifier", reason, None);
-                            (*approved, reason.clone())
-                        }
-                        Err(e) => {
-                            emit_progress(
-                                &app,
-                                &task_id,
-                                "verifier",
-                                &format!("Verification error: {}", e),
-                                None,
-                            );
-                            (false, String::new())
+                        match verification {
+                            Ok((approved, reason)) => {
+                                emit_progress(&app, &task_id, "verifier", &reason, None);
+                                (approved, reason)
+                            }
+                            Err(e) => {
+                                emit_progress(
+                                    &app,
+                                    &task_id,
+                                    "verifier",
+                                    &format!("Verification error: {}", e),
+                                    None,
+                                );
+                                (false, String::new())
+                            }
                         }
                     };
 
-                    // Require human approval when the verifier rejects the action.
-                    // Risk hints alone do NOT block (per spec: "Do not block on
-                    // is_risky_action alone"), but they are surfaced as additional
-                    // context in the approval request.
-                    if !verified {
+                    // Decide whether human approval is needed.
+                    let needs_human = match settings.hil_routing_mode {
+                        // None: never ask
+                        HilRoutingMode::None => false,
+                        // All: ask whenever verifier rejects
+                        HilRoutingMode::All => !verified,
+                        // Auto: destructive actions always escalate regardless of verifier result;
+                        // otherwise let verifier approval stand; only escalate on verifier rejection
+                        // if no similar prior action was approved.
+                        HilRoutingMode::Auto => {
+                            if is_destructive_action(&action) {
+                                true
+                            } else if verified {
+                                false
+                            } else {
+                                !has_similar_prior_approval(&approval_history, &action)
+                            }
+                        }
+                    };
+
+                    if needs_human {
                         let approval_reason = if verify_reason.is_empty() {
                             hint.clone().unwrap_or_else(|| {
                                 format!("Action flagged as potentially unsafe: {}", action.action_type)
@@ -366,20 +445,78 @@ pub async fn run_agent_task(
                         let human_approved =
                             request_human_approval(&app, &action, &approval_reason, &task_id)
                                 .await;
+
+                        // Record decision in rolling window (keep last 20).
+                        let record = ApprovalRecord {
+                            action_type: action.action_type.clone(),
+                            selector_or_url: action
+                                .selector
+                                .as_deref()
+                                .or(action.url.as_deref())
+                                .unwrap_or("")
+                                .to_lowercase(),
+                            approved: human_approved,
+                        };
+                        approval_history.push(record);
+                        if approval_history.len() > 20 {
+                            approval_history.remove(0);
+                        }
+
                         if !human_approved {
+                            denial_streak += 1;
+                            let retry_msg = if settings.auto_try_alternatives && denial_streak <= MAX_AUTO_RETRY_ATTEMPTS {
+                                "Action was rejected. Please try a different approach (auto-retry)."
+                            } else {
+                                "Action was rejected. Please choose a safer alternative."
+                            };
                             conversation_history.push(LlmMessage {
                                 role: "assistant".to_string(),
                                 content: thought.clone(),
                             });
                             conversation_history.push(LlmMessage {
                                 role: "user".to_string(),
-                                content:
-                                    "Action was rejected. Please choose a safer alternative."
-                                        .to_string(),
+                                content: retry_msg.to_string(),
                             });
+                            if !settings.auto_try_alternatives || denial_streak > MAX_AUTO_RETRY_ATTEMPTS {
+                                denial_streak = 0;
+                            }
                             continue;
                         }
+                        denial_streak = 0;
                         emit_progress(&app, &task_id, "verifier", "✅ Human approved.", None);
+                    } else if !verified && !needs_human {
+                        // Auto mode: auto-approved via rolling window similarity.
+                        let record = ApprovalRecord {
+                            action_type: action.action_type.clone(),
+                            selector_or_url: action
+                                .selector
+                                .as_deref()
+                                .or(action.url.as_deref())
+                                .unwrap_or("")
+                                .to_lowercase(),
+                            approved: true,
+                        };
+                        approval_history.push(record);
+                        if approval_history.len() > 20 {
+                            approval_history.remove(0);
+                        }
+                        emit_progress(&app, &task_id, "verifier", "✅ Auto-approved (similar to prior approved action).", None);
+                    } else if verified {
+                        // Record verifier-approved actions too, for future similarity checks.
+                        let record = ApprovalRecord {
+                            action_type: action.action_type.clone(),
+                            selector_or_url: action
+                                .selector
+                                .as_deref()
+                                .or(action.url.as_deref())
+                                .unwrap_or("")
+                                .to_lowercase(),
+                            approved: true,
+                        };
+                        approval_history.push(record);
+                        if approval_history.len() > 20 {
+                            approval_history.remove(0);
+                        }
                     }
 
                     // Execute action
@@ -465,7 +602,20 @@ pub async fn run_agent_task(
             }
             Err(e) => {
                 agent_task.status = "error".to_string();
-                emit_progress(&app, &task_id, "navigator", &format!("Error: {}", e), None);
+                let err_msg = format!("Error: {}", e);
+                emit_progress(&app, &task_id, "navigator", &err_msg, None);
+                let truncated = if err_msg.chars().count() > 120 {
+                    format!("{}…", err_msg.chars().take(120).collect::<String>())
+                } else {
+                    err_msg
+                };
+                let _ = app.emit(
+                    "flox://error",
+                    serde_json::json!({
+                        "message": truncated,
+                        "severity": "error"
+                    }),
+                );
                 break;
             }
         }
@@ -612,6 +762,7 @@ async fn call_verifier(
     action: &BrowserAction,
     risk_hint_msg: Option<&str>,
     skill_permissions: &[String],
+    approval_history: &[ApprovalRecord],
 ) -> Result<(bool, String), anyhow::Error> {
     let perms_str = if skill_permissions.is_empty() {
         "none".to_string()
@@ -626,6 +777,27 @@ async fn call_verifier(
 
     if let Some(hint) = risk_hint_msg {
         context.push_str(&format!("\nRisk hint: {}", hint));
+    }
+
+    // Include rolling window of recent decisions as context for the verifier.
+    if !approval_history.is_empty() {
+        let history_str: Vec<String> = approval_history
+            .iter()
+            .rev()
+            .take(10)
+            .map(|r| {
+                format!(
+                    "  - {} on '{}': {}",
+                    r.action_type,
+                    r.selector_or_url,
+                    if r.approved { "approved" } else { "denied" }
+                )
+            })
+            .collect();
+        context.push_str(&format!(
+            "\nRecent approval history (most recent first):\n{}",
+            history_str.join("\n")
+        ));
     }
 
     let messages = vec![
@@ -693,6 +865,8 @@ async fn call_llm_with_retry(
     }
 }
 
+/// Maximum consecutive denials before auto-retry is exhausted (used with `auto_try_alternatives`).
+const MAX_AUTO_RETRY_ATTEMPTS: u32 = 2;
 /// Maximum exponential backoff wait before an LLM retry (seconds).
 const MAX_BACKOFF_SECS: u64 = 30;
 /// Maximum message content length before truncation on HTTP 413 retry.

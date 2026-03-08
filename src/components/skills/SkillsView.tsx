@@ -10,6 +10,12 @@ import {
   Tag,
   Edit2,
   Download,
+  Copy,
+  Search,
+  ChevronDown,
+  ChevronUp,
+  CheckCircle,
+  BookOpen,
 } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 import { useAppStore } from '../../store';
@@ -18,7 +24,9 @@ import { Badge } from '../ui/Badge';
 import { Toggle } from '../ui/Toggle';
 import { Input } from '../ui/Input';
 import { CreateSkillModal } from './CreateSkillModal';
-import type { Skill } from '../../types';
+import type { Skill, SkillUsage } from '../../types';
+
+type SortKey = 'name-asc' | 'name-desc' | 'date-newest' | 'date-oldest';
 
 export const SkillsView: React.FC = () => {
   const { skills, setSkills, addSkill, updateSkill, removeSkill } = useAppStore();
@@ -29,6 +37,8 @@ export const SkillsView: React.FC = () => {
   const [showInstallForm, setShowInstallForm] = useState(false);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [editingSkill, setEditingSkill] = useState<Skill | null>(null);
+  const [search, setSearch] = useState('');
+  const [sortKey, setSortKey] = useState<SortKey>('date-newest');
 
   const loadSkills = useCallback(async () => {
     setLoading(true);
@@ -103,12 +113,55 @@ export const SkillsView: React.FC = () => {
     URL.revokeObjectURL(url);
   };
 
+  const handleDuplicate = (skill: Skill) => {
+    const clone: Skill = {
+      ...skill,
+      id: '',
+      name: `Copy of ${skill.name}`,
+      installed_at: new Date().toISOString(),
+    };
+    setEditingSkill(clone);
+    setShowCreateModal(true);
+  };
+
   const permissionColor = (perm: string): 'default' | 'success' | 'warning' | 'danger' | 'info' => {
     if (perm === 'sensitive_data') return 'danger';
     if (perm === 'submit_forms') return 'warning';
     if (perm === 'fill_forms') return 'info';
     return 'default';
   };
+
+  // Filter and sort
+  const searchLower = search.toLowerCase();
+  const filteredSkills = skills
+    .filter((s) => {
+      if (!searchLower) return true;
+      return (
+        s.name.toLowerCase().includes(searchLower) ||
+        s.triggers_keywords.some((kw) => kw.toLowerCase().includes(searchLower)) ||
+        s.triggers_domains.some((d) => d.toLowerCase().includes(searchLower))
+      );
+    })
+    .sort((a, b) => {
+      switch (sortKey) {
+        case 'name-asc':
+          return a.name.localeCompare(b.name);
+        case 'name-desc':
+          return b.name.localeCompare(a.name);
+        case 'date-oldest':
+          return a.installed_at.localeCompare(b.installed_at);
+        case 'date-newest':
+        default:
+          return b.installed_at.localeCompare(a.installed_at);
+      }
+    });
+
+  const sortOptions: { value: SortKey; label: string }[] = [
+    { value: 'date-newest', label: 'Newest first' },
+    { value: 'date-oldest', label: 'Oldest first' },
+    { value: 'name-asc', label: 'Name A → Z' },
+    { value: 'name-desc', label: 'Name Z → A' },
+  ];
 
   return (
     <div className="flex-1 overflow-y-auto p-6 bg-[#000000]">
@@ -137,6 +190,29 @@ export const SkillsView: React.FC = () => {
               Create
             </Button>
           </div>
+        </div>
+
+        {/* Search + Sort */}
+        <div className="flex gap-2">
+          <div className="relative flex-1">
+            <Search className="w-4 h-4 text-[#606060] absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+            <input
+              type="text"
+              placeholder="Search by name, keyword, or domain…"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="w-full pl-9 pr-3 py-2 bg-[#0f0f0f] border border-[#1f1f1f] rounded-xl text-sm text-white placeholder-[#606060] focus:outline-none focus:border-violet-600/50"
+            />
+          </div>
+          <select
+            value={sortKey}
+            onChange={(e) => setSortKey(e.target.value as SortKey)}
+            className="bg-[#0f0f0f] border border-[#1f1f1f] rounded-xl text-sm text-[#a0a0a0] px-3 py-2 focus:outline-none focus:border-violet-600/50"
+          >
+            {sortOptions.map((o) => (
+              <option key={o.value} value={o.value}>{o.label}</option>
+            ))}
+          </select>
         </div>
 
         {/* Install from URL */}
@@ -180,14 +256,16 @@ export const SkillsView: React.FC = () => {
         </div>
 
         {/* Skill list */}
-        {skills.length === 0 ? (
+        {filteredSkills.length === 0 ? (
           <div className="text-center py-12">
             <Puzzle className="w-10 h-10 text-[#2a2a2a] mx-auto mb-3" />
-            <p className="text-sm text-[#606060]">No skills installed</p>
+            <p className="text-sm text-[#606060]">
+              {search ? 'No skills match your search.' : 'No skills installed'}
+            </p>
           </div>
         ) : (
           <div className="space-y-4">
-            {skills.map((skill) => (
+            {filteredSkills.map((skill) => (
               <SkillCard
                 key={skill.id}
                 skill={skill}
@@ -195,6 +273,7 @@ export const SkillsView: React.FC = () => {
                 onUninstall={() => handleUninstall(skill.id)}
                 onEdit={() => { setEditingSkill(skill); setShowCreateModal(true); }}
                 onExport={() => handleExport(skill)}
+                onDuplicate={() => handleDuplicate(skill)}
                 permissionColor={permissionColor}
               />
             ))}
@@ -220,6 +299,7 @@ interface SkillCardProps {
   onUninstall: () => void;
   onEdit: () => void;
   onExport: () => void;
+  onDuplicate: () => void;
   permissionColor: (perm: string) => 'default' | 'success' | 'warning' | 'danger' | 'info';
 }
 
@@ -229,9 +309,29 @@ const SkillCard: React.FC<SkillCardProps> = ({
   onUninstall,
   onEdit,
   onExport,
+  onDuplicate,
   permissionColor,
 }) => {
   const [expanded, setExpanded] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [usage, setUsage] = useState<SkillUsage | null>(null);
+  const [loadingUsage, setLoadingUsage] = useState(false);
+
+  const handleExpand = async () => {
+    const next = !expanded;
+    setExpanded(next);
+    if (next && usage === null) {
+      setLoadingUsage(true);
+      try {
+        const result = await invoke<SkillUsage>('get_skill_usage', { skillId: skill.id });
+        setUsage(result);
+      } catch {
+        setUsage({ automations: [], conversations: [] });
+      } finally {
+        setLoadingUsage(false);
+      }
+    }
+  };
 
   return (
     <div
@@ -288,13 +388,14 @@ const SkillCard: React.FC<SkillCardProps> = ({
           </div>
         )}
 
-        {/* Prompt preview toggle */}
+        {/* Prompt / Usage expand toggle */}
         {(skill.planner_prompt || skill.navigator_prompt) && (
           <button
-            className="text-xs text-violet-400 hover:text-violet-300 underline"
-            onClick={() => setExpanded((v) => !v)}
+            className="text-xs text-violet-400 hover:text-violet-300 underline flex items-center gap-1"
+            onClick={handleExpand}
           >
-            {expanded ? 'Hide prompts' : 'View prompt fragments'}
+            {expanded ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+            {expanded ? 'Collapse details' : 'View prompts & usage'}
           </button>
         )}
 
@@ -316,6 +417,48 @@ const SkillCard: React.FC<SkillCardProps> = ({
                 </pre>
               </div>
             )}
+
+            {/* Usage section */}
+            <div>
+              <p className="text-xs font-medium text-[#606060] mb-1 flex items-center gap-1">
+                <BookOpen className="w-3 h-3" />
+                Used in
+              </p>
+              {loadingUsage ? (
+                <p className="text-xs text-[#606060]">Loading…</p>
+              ) : usage ? (
+                <div className="space-y-1">
+                  {usage.automations.length === 0 && usage.conversations.length === 0 ? (
+                    <p className="text-xs text-[#606060]">No references found.</p>
+                  ) : (
+                    <>
+                      {usage.automations.length > 0 && (
+                        <div>
+                          <p className="text-xs text-[#606060] mb-0.5">Automations:</p>
+                          {usage.automations.map((name, i) => (
+                            <span key={`auto-${i}-${name}`} className="inline-flex items-center gap-1 mr-1.5 px-2 py-0.5 rounded-lg text-xs bg-[#1a1a1a] text-[#a0a0a0]">
+                              <CheckCircle className="w-3 h-3 text-violet-400" />
+                              {name}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                      {usage.conversations.length > 0 && (
+                        <div>
+                          <p className="text-xs text-[#606060] mb-0.5">Conversations:</p>
+                          {usage.conversations.map((title, i) => (
+                            <span key={`conv-${i}-${title}`} className="inline-flex items-center gap-1 mr-1.5 px-2 py-0.5 rounded-lg text-xs bg-[#1a1a1a] text-[#a0a0a0]">
+                              <CheckCircle className="w-3 h-3 text-violet-400" />
+                              {title}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
+              ) : null}
+            </div>
           </div>
         )}
       </div>
@@ -333,19 +476,44 @@ const SkillCard: React.FC<SkillCardProps> = ({
             Edit
           </button>
           <button
+            onClick={onDuplicate}
+            className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-xs bg-[#1a1a1a] hover:bg-[#2a2a2a] text-[#a0a0a0] transition-colors"
+          >
+            <Copy className="w-3 h-3" />
+            Duplicate
+          </button>
+          <button
             onClick={onExport}
             className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-xs bg-[#1a1a1a] hover:bg-[#2a2a2a] text-[#a0a0a0] transition-colors"
           >
             <Download className="w-3 h-3" />
             Export
           </button>
-          <button
-            onClick={onUninstall}
-            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs bg-red-500/10 hover:bg-red-500/20 text-red-400 transition-colors"
-          >
-            <Trash2 className="w-3.5 h-3.5" />
-            Uninstall
-          </button>
+          {confirmDelete ? (
+            <div className="flex items-center gap-1">
+              <button
+                onClick={onUninstall}
+                className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-xs bg-red-500/20 hover:bg-red-500/30 text-red-400 transition-colors"
+              >
+                <CheckCircle className="w-3.5 h-3.5" />
+                Confirm
+              </button>
+              <button
+                onClick={() => setConfirmDelete(false)}
+                className="flex items-center px-2.5 py-1.5 rounded-xl text-xs bg-[#1a1a1a] hover:bg-[#2a2a2a] text-[#a0a0a0] transition-colors"
+              >
+                Cancel
+              </button>
+            </div>
+          ) : (
+            <button
+              onClick={() => setConfirmDelete(true)}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs bg-red-500/10 hover:bg-red-500/20 text-red-400 transition-colors"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              Delete
+            </button>
+          )}
         </div>
       </div>
     </div>
