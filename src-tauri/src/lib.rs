@@ -7,6 +7,8 @@ mod db;
 mod network;
 mod conversations;
 
+use tauri::Emitter;
+
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
@@ -18,7 +20,24 @@ pub fn run() {
                 .app_data_dir()
                 .expect("app data dir not available");
             std::fs::create_dir_all(&data_dir)?;
-            db::init(data_dir).map_err(|e| e.to_string())?;
+            if let Err(e) = db::init(data_dir) {
+                // Emit the error after the window is ready rather than crashing.
+                let app_handle = app.handle().clone();
+                let err_msg = e.to_string();
+                tokio::spawn(async move {
+                    tokio::time::sleep(tokio::time::Duration::from_millis(2000)).await;
+                    let _ = app_handle.emit(
+                        "flox://error",
+                        serde_json::json!({
+                            "message": format!(
+                                "Database initialisation failed. Check app data directory permissions. ({})",
+                                err_msg
+                            ),
+                            "severity": "error"
+                        }),
+                    );
+                });
+            }
 
             // Set up automation scheduler.
             let app_handle = app.handle().clone();
@@ -52,6 +71,7 @@ pub fn run() {
             skills::update_skill,
             skills::uninstall_skill,
             skills::toggle_skill,
+            skills::get_skill_usage,
             conversations::get_conversations,
             conversations::save_conversation,
             conversations::delete_conversation,

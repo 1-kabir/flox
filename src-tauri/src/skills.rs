@@ -27,6 +27,13 @@ pub struct Skill {
     pub source_url: Option<String>,
 }
 
+/// Usage information for a skill: which automations and conversations reference it.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SkillUsage {
+    pub automations: Vec<String>,
+    pub conversations: Vec<String>,
+}
+
 impl Default for Skill {
     fn default() -> Self {
         Self {
@@ -151,6 +158,102 @@ pub async fn toggle_skill(
         upsert_skill(skill)?;
     }
     Ok(())
+}
+
+/// Returns automation names and conversation titles that reference this skill.
+/// Matches are keyword-based: the skill's trigger keywords are searched in
+/// automation prompts and conversation message content / agent_steps data.
+#[tauri::command]
+pub async fn get_skill_usage(
+    _app: tauri::AppHandle,
+    skill_id: String,
+) -> Result<SkillUsage, String> {
+    let skills = get_all_skills()?;
+    let skill = skills
+        .iter()
+        .find(|s| s.id == skill_id)
+        .ok_or_else(|| "Skill not found".to_string())?;
+
+    let keywords: Vec<String> = skill
+        .triggers_keywords
+        .iter()
+        .map(|k| k.to_lowercase())
+        .filter(|k| !k.is_empty())
+        .collect();
+
+    if keywords.is_empty() {
+        return Ok(SkillUsage {
+            automations: Vec::new(),
+            conversations: Vec::new(),
+        });
+    }
+
+    let automations = db::with_conn(|conn| {
+        let mut stmt = conn.prepare("SELECT data FROM automations ORDER BY rowid")?;
+        let rows: Vec<String> = stmt
+            .query_map([], |row| row.get::<_, String>(0))?
+            .filter_map(|r| r.ok())
+            .collect();
+        Ok(rows)
+    })?;
+
+    let matching_automations: Vec<String> = automations
+        .iter()
+        .filter_map(|data| {
+            let v: serde_json::Value = serde_json::from_str(data).ok()?;
+            let prompt = v.get("prompt")?.as_str()?.to_lowercase();
+            let name = v.get("name")?.as_str()?.to_string();
+            if keywords.iter().any(|kw| prompt.contains(kw.as_str())) {
+                Some(name)
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    // Find conversations where any message content references the skill's keywords.
+    let matching_conversations: Vec<String> = db::with_conn(|conn| {
+        let mut stmt = conn.prepare(
+            "SELECT DISTINCT c.title
+             FROM conversations c
+             JOIN messages m ON m.conversation_id = c.id",
+        )?;
+        let rows: Vec<(String, String)> = stmt
+            .query_map([], |row| Ok((row.get::<_, String>(0)?, String::new())))?
+            .filter_map(|r| r.ok())
+            .collect();
+        Ok(rows)
+    })
+    .unwrap_or_default()
+    .into_iter()
+    .filter_map(|(title, _)| {
+        // Fetch messages for each conversation and check content.
+        let found = db::with_conn(|conn| {
+            let mut stmt = conn.prepare(
+                "SELECT content FROM messages WHERE conversation_id IN (
+                     SELECT id FROM conversations WHERE title = ?1
+                 )",
+            )?;
+            let contents: Vec<String> = stmt
+                .query_map([&title], |row| row.get::<_, String>(0))?
+                .filter_map(|r| r.ok())
+                .collect();
+            Ok(contents)
+        })
+        .unwrap_or_default();
+
+        let matched = found.iter().any(|content| {
+            let lower = content.to_lowercase();
+            keywords.iter().any(|kw| lower.contains(kw.as_str()))
+        });
+        if matched { Some(title) } else { None }
+    })
+    .collect();
+
+    Ok(SkillUsage {
+        automations: matching_automations,
+        conversations: matching_conversations,
+    })
 }
 
 // ---------------------------------------------------------------------------

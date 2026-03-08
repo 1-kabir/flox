@@ -15,6 +15,8 @@ export interface ModelConfig {
   max_tokens: number;
 }
 
+export type HilRoutingMode = 'all' | 'none' | 'auto';
+
 export interface AppSettings {
   planner_model: ModelConfig;
   navigator_model: ModelConfig;
@@ -27,6 +29,9 @@ export interface AppSettings {
   navigator_vision: boolean;
   max_steps: number;
   timeout_seconds: number;
+  hil_routing_mode: HilRoutingMode;
+  auto_try_alternatives: boolean;
+  onboarding_complete: boolean;
 }
 
 export interface Message {
@@ -123,6 +128,11 @@ export interface Skill {
   enabled: boolean;
   installed_at: string;
   source_url?: string;
+}
+
+export interface SkillUsage {
+  automations: string[];
+  conversations: string[];
 }
 
 // ---------------------------------------------------------------------------

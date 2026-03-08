@@ -112,6 +112,60 @@ flox/
 
 ---
 
+## 🖥️ Self-Hosting
+
+### Prerequisites
+
+| Dependency | Minimum version | Notes |
+|---|---|---|
+| [Rust stable toolchain](https://rustup.rs/) | 1.70+ | `rustup update stable` |
+| [Node.js](https://nodejs.org/) | 18+ | LTS recommended |
+| A Chromium-based browser | Any | Chrome, Edge, Brave, or Vivaldi |
+
+**Linux** additionally requires **webkit2gtk** and related GTK libraries:
+
+```bash
+sudo apt-get install -y \
+  libgtk-3-dev libwebkit2gtk-4.1-dev libappindicator3-dev \
+  librsvg2-dev patchelf libssl-dev
+```
+
+**Windows** requires [WebView2](https://developer.microsoft.com/en-us/microsoft-edge/webview2/) (pre-installed on Windows 11; available as a redistributable for Windows 10).
+
+**macOS** works out of the box — WebKit is bundled with the OS.
+
+### Build
+
+```bash
+git clone https://github.com/1-kabir/flox
+cd flox
+npm install
+npm run tauri build
+```
+
+The compiled installer/bundle is placed in `src-tauri/target/release/bundle/`.
+
+### Development Mode
+
+```bash
+npm run tauri dev
+```
+
+This starts the Vite dev server and the Tauri window in watch mode.  
+Hot-reload applies to all frontend changes; Rust changes require a full recompile.
+
+### Troubleshooting
+
+| Problem | Solution |
+|---|---|
+| **Browser not detected** | Ensure Chrome, Edge, Brave, or Vivaldi is installed, then click *Detect Browsers* in Settings |
+| **SQLite file location** | Database is stored at `{appDataDir}/flox.db` — on Linux typically `~/.local/share/flox/flox.db`, on macOS `~/Library/Application Support/flox/flox.db`, on Windows `%APPDATA%\flox\flox.db` |
+| **Reset settings** | Delete (or rename) `flox.db` — the app will recreate it with defaults on next launch |
+| **Linux: glib-2.0 not found** | Run the `apt-get install` command shown above for the webkit2gtk dependencies |
+| **Windows: build fails on OpenSSL** | Install [OpenSSL for Windows](https://slproweb.com/products/Win32OpenSSL.html) and set `OPENSSL_DIR` in your environment |
+
+---
+
 ## 📝 License
 
 MIT License — see [LICENSE](LICENSE)

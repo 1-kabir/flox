@@ -6,6 +6,7 @@ import {
   Brain,
   Save,
   CheckCircle,
+  ShieldCheck,
 } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 import { useAppStore } from '../../store';
@@ -13,7 +14,7 @@ import { Button } from '../ui/Button';
 import { Toggle } from '../ui/Toggle';
 import { Select } from '../ui/Select';
 import { ModelConfigCard } from './ModelConfigCard';
-import type { AppSettings, BrowserInfo } from '../../types';
+import type { AppSettings, BrowserInfo, HilRoutingMode } from '../../types';
 
 export const SettingsView: React.FC = () => {
   const { settings, setSettings, browsers, setBrowsers } = useAppStore();
@@ -303,6 +304,90 @@ export const SettingsView: React.FC = () => {
                   {localSettings.timeout_seconds}s
                 </span>
               </div>
+            </div>
+          </div>
+        </section>
+
+        {/* Human-In-the-Loop Control */}
+        <section className="space-y-3">
+          <div className="flex items-center gap-2">
+            <ShieldCheck className="w-4 h-4 text-gray-400" />
+            <h2 className="text-sm font-semibold text-gray-300 uppercase tracking-wide">
+              Human-In-the-Loop Control
+            </h2>
+          </div>
+
+          <div className="bg-gray-800/50 rounded-2xl p-5 border border-gray-700/50 space-y-5">
+            <div className="space-y-3">
+              <div>
+                <p className="text-sm font-medium text-gray-200">HIL Routing Mode</p>
+                <p className="text-xs text-gray-500 mt-0.5">
+                  Controls when risky browser actions are sent for human review.
+                </p>
+              </div>
+
+              {(
+                [
+                  {
+                    value: 'all' as HilRoutingMode,
+                    label: 'All',
+                    description: 'Every risky action requires your approval.',
+                  },
+                  {
+                    value: 'none' as HilRoutingMode,
+                    label: 'None',
+                    description: 'All actions auto-approved. Use with caution.',
+                  },
+                  {
+                    value: 'auto' as HilRoutingMode,
+                    label: 'Auto',
+                    description:
+                      'AI verifier decides; only uncertain/destructive actions reach you.',
+                  },
+                ] as { value: HilRoutingMode; label: string; description: string }[]
+              ).map((option) => (
+                <label
+                  key={option.value}
+                  className={`flex items-start gap-3 p-3 rounded-xl cursor-pointer border transition-colors ${
+                    localSettings.hil_routing_mode === option.value
+                      ? 'border-violet-600/50 bg-violet-600/10'
+                      : 'border-gray-700/40 hover:border-gray-600/40'
+                  }`}
+                >
+                  <input
+                    type="radio"
+                    name="hil_routing_mode"
+                    value={option.value}
+                    checked={localSettings.hil_routing_mode === option.value}
+                    onChange={() =>
+                      setLocalSettings((s) => ({
+                        ...s,
+                        hil_routing_mode: option.value,
+                      }))
+                    }
+                    className="mt-0.5 accent-violet-600"
+                  />
+                  <div>
+                    <p className="text-sm font-medium text-gray-200">{option.label}</p>
+                    <p className="text-xs text-gray-500">{option.description}</p>
+                  </div>
+                </label>
+              ))}
+            </div>
+
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-gray-200">Auto-try Alternatives</p>
+                <p className="text-xs text-gray-500 mt-0.5">
+                  If an action is denied, agents automatically retry with a different approach.
+                </p>
+              </div>
+              <Toggle
+                checked={localSettings.auto_try_alternatives}
+                onChange={(v) =>
+                  setLocalSettings((s) => ({ ...s, auto_try_alternatives: v }))
+                }
+              />
             </div>
           </div>
         </section>
