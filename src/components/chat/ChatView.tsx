@@ -147,13 +147,22 @@ export const ChatView: React.FC = () => {
     } else {
       const conv = conversations.find((c) => c.id === convId);
       if (conv && conv.messages.length === 0) {
-        updateConversation(convId, { title: userInput.substring(0, 40) });
+        // Auto-title: use the first user message as the conversation title and
+        // immediately persist the updated title so the DB stays in sync.
+        const newTitle = userInput.substring(0, 40);
+        updateConversation(convId, { title: newTitle });
+        convData = {
+          id: convId,
+          title: newTitle,
+          created_at: conv.created_at,
+        };
+      } else {
+        convData = {
+          id: convId,
+          title: conv?.title ?? userInput.substring(0, 40),
+          created_at: conv?.created_at ?? new Date().toISOString(),
+        };
       }
-      convData = {
-        id: convId,
-        title: conv?.title ?? userInput.substring(0, 40),
-        created_at: conv?.created_at ?? new Date().toISOString(),
-      };
     }
 
     // Add user message

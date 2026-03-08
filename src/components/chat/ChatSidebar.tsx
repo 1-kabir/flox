@@ -3,7 +3,7 @@ import { Plus, MessageSquare, Trash2 } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 import { useAppStore } from '../../store';
 import { cn, generateId, formatRelativeTime, truncate } from '../../lib/utils';
-import type { Conversation } from '../../types';
+import type { Conversation, Message } from '../../types';
 
 export const ChatSidebar: React.FC = () => {
   const {
@@ -11,6 +11,7 @@ export const ChatSidebar: React.FC = () => {
     activeConversationId,
     setActiveConversation,
     addConversation,
+    updateConversation,
     deleteConversation: storeDeleteConversation,
   } = useAppStore();
 
@@ -33,6 +34,22 @@ export const ChatSidebar: React.FC = () => {
         browser_path: null,
       },
     }).catch(console.error);
+  };
+
+  // Switch to an existing conversation and ensure its messages are loaded.
+  const selectConversation = async (conv: Conversation) => {
+    setActiveConversation(conv.id);
+    // Only fetch if messages haven't been loaded yet for this conversation.
+    if (conv.messages.length === 0) {
+      try {
+        const messages = await invoke<Message[]>('get_messages', {
+          conversationId: conv.id,
+        });
+        updateConversation(conv.id, { messages });
+      } catch (e) {
+        console.error('Failed to load messages:', e);
+      }
+    }
   };
 
   const deleteConversation = (e: React.MouseEvent, id: string) => {
@@ -66,7 +83,7 @@ export const ChatSidebar: React.FC = () => {
             key={conv.id}
             conversation={conv}
             isActive={activeConversationId === conv.id}
-            onClick={() => setActiveConversation(conv.id)}
+            onClick={() => selectConversation(conv)}
             onDelete={(e) => deleteConversation(e, conv.id)}
           />
         ))}

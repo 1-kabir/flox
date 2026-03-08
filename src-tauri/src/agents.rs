@@ -253,7 +253,9 @@ pub async fn run_agent_task(
         );
 
         // If navigator_vision is disabled, extract page context as text instead.
-        let page_context = if settings.screenshots_enabled && !settings.navigator_vision {
+        // Always extract DOM context when vision is off, regardless of whether
+        // screenshots are enabled — without this the navigator has no context at all.
+        let page_context = if !settings.navigator_vision {
             let js = r#"JSON.stringify({
   url: location.href,
   title: document.title,
