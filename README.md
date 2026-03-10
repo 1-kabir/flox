@@ -1,140 +1,42 @@
-# Flox - AI Browser Automation
+# Flox — AI Browser Automation
 
-> The most powerful and configurable desktop-based browser AI automation tool.
+<p align="center">
+  <strong>The most powerful and configurable desktop-based AI browser automation tool.</strong><br>
+  Open-source · Cross-platform · Bring Your Own Keys
+</p>
 
-Flox is a cross-platform, open-source desktop application built with **Tauri** (Rust) and **React/TypeScript** that lets you automate browser tasks using AI. Configure your own LLM keys (BYOK) and models (BYOM), chat with the AI to run browser tasks, or schedule recurring automations that run in the background.
+---
+
+Flox is a desktop application that lets you automate anything in your browser using AI. Just tell it what you want in plain English — "fill out this form", "check my emails and summarize them", "monitor this page and alert me when prices drop" — and Flox's three-agent AI system takes care of the rest.
+
+Built with [Tauri](https://tauri.app/) (Rust) and React/TypeScript, Flox runs natively on **Windows**, **macOS**, and **Linux**. You bring your own API keys (BYOK) and models (BYOM), so your data never passes through any Flox servers.
 
 ---
 
 ## ✨ Features
 
-### 🤖 Three-Agent AI System
-- **Planner Agent** — Breaks down your goal into a step-by-step browser automation plan
-- **Navigator Agent** — Executes actions in the browser (click, type, scroll, navigate, etc.) with optional screenshot vision
-- **Verifier Agent** — Validates each action for safety and correctness before execution
-
-### 🌐 Browser Detection & Management
-- Automatically detects installed Chromium-based browsers: **Google Chrome**, **Microsoft Edge**, **Brave**, **Vivaldi**, **Chromium**
-- Select which browser to use per task
-- Optional **headless mode** for background execution
-
-### 🛠️ Browser Automation Tools (via CDP)
-- Navigate to URLs
-- Click elements by CSS selector or coordinates
-- Type text into inputs
-- Scroll pages
-- Press keyboard keys
-- Execute JavaScript
-- Capture screenshots
-
-### 🔑 Bring Your Own Keys & Models (BYOK/BYOM)
-- **OpenAI** (GPT-4o, GPT-4o mini, etc.)
-- **Anthropic** (Claude 3.5 Sonnet, etc.)
-- **Groq** (Llama, Mixtral)
-- **Ollama** (local models)
-- **Any OpenAI-compatible API** (custom base URL)
-- Configure separate models for each agent
-
-### ⏰ Scheduled Automations
-- Create named automations with custom prompts
-- Set custom intervals (minutes to hours)
-- Enable/disable automations independently
-- Run immediately or wait for schedule
-- App lives in the **system tray** and restarts automations on wake
-
-### 🎨 Modern UI/UX
-- **Dark & Light mode** toggle
-- **Poppins** font
-- Rounded corners, minimalistic design
-- Conversation history sidebar
-- Real-time agent activity logs with screenshots
+| Feature | Description |
+|---|---|
+| 🤖 **Three-Agent AI** | Planner, Navigator, and Verifier agents work together to safely execute browser tasks |
+| 🌐 **Browser Detection** | Auto-detects Chrome, Edge, Brave, Vivaldi, and Chromium |
+| 🛡️ **Human-in-the-Loop** | You approve risky actions before they execute — always in control |
+| 🔑 **BYOK / BYOM** | OpenAI, Anthropic, Groq, Ollama, or any OpenAI-compatible API |
+| ⏰ **Scheduled Automations** | Set recurring tasks that run on a schedule, even while minimized to tray |
+| 🧩 **Skills System** | Domain/keyword-triggered extensions that customize agent behavior |
+| 💬 **Conversation History** | Full chat history with screenshots of every agent action |
+| 🌙 **Dark & Light Mode** | Comfortable UI for any environment |
 
 ---
 
-## 🚀 Getting Started
+## 🚀 Quick Start
 
-### Prerequisites
-- [Node.js 18+](https://nodejs.org/)
-- [Rust 1.70+](https://rustup.rs/)
-- A Chromium-based browser installed
+### Download
 
-### Development
+Download the latest release for your platform from the [Releases](https://github.com/1-kabir/flox/releases) page.
 
-```bash
-# Install frontend dependencies
-npm install
+### Build from Source
 
-# Run in development mode
-npm run tauri dev
-```
-
-### Build
-
-```bash
-# Build for production
-npm run tauri build
-```
-
----
-
-## ⚙️ Configuration
-
-Open **Settings** in the app to configure:
-
-1. **Browser** — Auto-detect installed browsers, select preferred browser
-2. **Planner Agent** — Model for high-level planning (recommended: GPT-4o or Claude 3.5 Sonnet)
-3. **Navigator Agent** — Model for browser navigation, needs vision support (recommended: GPT-4o)
-4. **Verifier Agent** — Model for action validation (recommended: GPT-4o mini)
-5. **Behavior** — Max steps, timeout, screenshot mode
-
----
-
-## 🏗️ Architecture
-
-```
-flox/
-├── src/                    # React/TypeScript frontend
-│   ├── components/
-│   │   ├── chat/           # Chat interface, browser selector, agent status
-│   │   ├── settings/       # Model config, browser settings
-│   │   ├── automations/    # Scheduled automation management
-│   │   ├── logs/           # Real-time activity logs
-│   │   └── ui/             # Reusable UI components
-│   ├── store.ts            # Zustand state management
-│   └── types.ts            # TypeScript type definitions
-└── src-tauri/              # Rust/Tauri backend
-    └── src/
-        ├── browser.rs      # Browser detection + CDP automation
-        ├── agents.rs       # Three-agent LLM orchestration
-        ├── automation.rs   # Scheduled automation engine
-        └── settings.rs     # Persistent settings store
-```
-
----
-
-## 🖥️ Self-Hosting
-
-### Prerequisites
-
-| Dependency | Minimum version | Notes |
-|---|---|---|
-| [Rust stable toolchain](https://rustup.rs/) | 1.70+ | `rustup update stable` |
-| [Node.js](https://nodejs.org/) | 18+ | LTS recommended |
-| A Chromium-based browser | Any | Chrome, Edge, Brave, or Vivaldi |
-
-**Linux** additionally requires **webkit2gtk** and related GTK libraries:
-
-```bash
-sudo apt-get install -y \
-  libgtk-3-dev libwebkit2gtk-4.1-dev libappindicator3-dev \
-  librsvg2-dev patchelf libssl-dev
-```
-
-**Windows** requires [WebView2](https://developer.microsoft.com/en-us/microsoft-edge/webview2/) (pre-installed on Windows 11; available as a redistributable for Windows 10).
-
-**macOS** works out of the box — WebKit is bundled with the OS.
-
-### Build
+> Requires [Node.js 18+](https://nodejs.org/) and [Rust stable](https://rustup.rs/).
 
 ```bash
 git clone https://github.com/1-kabir/flox
@@ -143,29 +45,84 @@ npm install
 npm run tauri build
 ```
 
-The compiled installer/bundle is placed in `src-tauri/target/release/bundle/`.
+The installer is placed in `src-tauri/target/release/bundle/`.
 
-### Development Mode
+**Linux** also requires webkit2gtk:
 
 ```bash
-npm run tauri dev
+sudo apt-get install -y \
+  libgtk-3-dev libwebkit2gtk-4.1-dev libappindicator3-dev \
+  librsvg2-dev patchelf libssl-dev
 ```
 
-This starts the Vite dev server and the Tauri window in watch mode.  
-Hot-reload applies to all frontend changes; Rust changes require a full recompile.
+---
 
-### Troubleshooting
+## ⚙️ First-Time Setup
 
-| Problem | Solution |
-|---|---|
-| **Browser not detected** | Ensure Chrome, Edge, Brave, or Vivaldi is installed, then click *Detect Browsers* in Settings |
-| **SQLite file location** | Database is stored at `{appDataDir}/flox.db` — on Linux typically `~/.local/share/flox/flox.db`, on macOS `~/Library/Application Support/flox/flox.db`, on Windows `%APPDATA%\flox\flox.db` |
-| **Reset settings** | Delete (or rename) `flox.db` — the app will recreate it with defaults on next launch |
-| **Linux: glib-2.0 not found** | Run the `apt-get install` command shown above for the webkit2gtk dependencies |
-| **Windows: build fails on OpenSSL** | Install [OpenSSL for Windows](https://slproweb.com/products/Win32OpenSSL.html) and set `OPENSSL_DIR` in your environment |
+1. Launch Flox — the onboarding wizard appears automatically.
+2. Open **Settings** and add your API key for at least one provider (e.g. OpenAI).
+3. Assign a model to each agent: **Planner**, **Navigator**, **Verifier**.
+4. Click **Detect Browsers** — Flox will find your installed Chrome/Edge/Brave.
+5. Return to the **Chat** tab and type your first task.
+
+Recommended models:
+- **Planner**: `gpt-4o` or `claude-3-5-sonnet`
+- **Navigator**: `gpt-4o` (vision recommended)
+- **Verifier**: `gpt-4o-mini`
+
+---
+
+## 🏗️ Architecture Overview
+
+```
+flox/
+├── src/                        # React + TypeScript frontend
+│   ├── components/
+│   │   ├── chat/               # Chat UI, browser selector, agent status bar
+│   │   ├── automations/        # Scheduled automation management
+│   │   ├── skills/             # Skills management UI
+│   │   ├── settings/           # Model & behavior configuration
+│   │   ├── activity/           # Real-time agent activity logs
+│   │   └── ui/                 # Shared UI components
+│   ├── store.ts                # Zustand global state
+│   └── types.ts                # TypeScript type definitions
+└── src-tauri/                  # Rust / Tauri backend
+    └── src/
+        ├── agents.rs           # Three-agent LLM orchestration + HIL approval
+        ├── browser.rs          # Browser detection + CDP automation
+        ├── automation.rs       # Scheduled automation scheduler
+        ├── skills.rs           # Skill registry & injection
+        ├── conversations.rs    # Chat history persistence
+        ├── settings.rs         # App configuration store
+        └── db.rs               # SQLite database (WAL mode)
+```
+
+---
+
+## 📖 Documentation
+
+Full documentation lives in the **[docs/](docs/)** directory:
+
+| Document | Audience | Description |
+|---|---|---|
+| [Getting Started](docs/getting-started.md) | Everyone | Installation, setup, and your first automation |
+| [User Guide](docs/user-guide.md) | Users | Complete walkthrough of all features |
+| [Configuration](docs/configuration.md) | Users | Settings, models, and behavior options |
+| [Automations](docs/automations.md) | Users | Scheduling and managing recurring tasks |
+| [Skills](docs/skills.md) | Users / Developers | Extending Flox with custom skills |
+| [Architecture](docs/architecture.md) | Developers | System design, data flow, and modules |
+| [Development Guide](docs/development.md) | Contributors | Dev setup, conventions, and contribution workflow |
+| [API Reference](docs/api-reference.md) | Developers | All Tauri backend commands documented |
+| [Troubleshooting](docs/troubleshooting.md) | Everyone | Solutions to common problems |
+
+---
+
+## 🤝 Contributing
+
+Contributions are welcome! See the [Development Guide](docs/development.md) for setup instructions, coding conventions, and how to submit a pull request.
 
 ---
 
 ## 📝 License
 
-MIT License — see [LICENSE](LICENSE)
+GNU General Public License v3.0 — see [LICENSE](LICENSE)
