@@ -138,6 +138,25 @@ export interface SkillUsage {
 }
 
 // ---------------------------------------------------------------------------
+// Secrets
+// ---------------------------------------------------------------------------
+
+/**
+ * A secret summary returned by the backend.
+ * The actual secret value is never included — agents and the UI
+ * only ever see the name and description.
+ */
+export interface SecretSummary {
+  id: string;
+  /** Public name used as {{placeholder}} in agent tasks. */
+  name: string;
+  /** Optional human-readable description. */
+  description: string;
+  created_at: string;
+  updated_at: string;
+}
+
+// ---------------------------------------------------------------------------
 // Human-in-the-loop approvals
 // ---------------------------------------------------------------------------
 export interface ApprovalRequest {

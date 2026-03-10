@@ -171,10 +171,7 @@ pub async fn start_automation_scheduler(app: tauri::AppHandle) {
             Err(_) => continue,
         };
 
-        let settings = match crate::settings::get_settings(app.clone()).await {
-            Ok(s) => s,
-            Err(_) => AppSettings::default(),
-        };
+        let settings: AppSettings = crate::settings::get_settings(app.clone()).await.unwrap_or_default();
 
         let now = chrono::Utc::now();
 

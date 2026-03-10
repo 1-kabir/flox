@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { AppSettings, BrowserInfo, Conversation, Message, Automation, AgentProgress, Skill, ApprovalRequest } from './types';
+import type { AppSettings, BrowserInfo, Conversation, Message, Automation, AgentProgress, Skill, ApprovalRequest, SecretSummary } from './types';
 
 const defaultSettings: AppSettings = {
   planner_model: {
@@ -48,8 +48,8 @@ interface AppState {
   toggleTheme: () => void;
 
   // Navigation
-  activeTab: 'chat' | 'automations' | 'settings' | 'logs' | 'skills';
-  setActiveTab: (tab: 'chat' | 'automations' | 'settings' | 'logs' | 'skills') => void;
+  activeTab: 'chat' | 'automations' | 'settings' | 'logs' | 'skills' | 'secrets';
+  setActiveTab: (tab: 'chat' | 'automations' | 'settings' | 'logs' | 'skills' | 'secrets') => void;
 
   // Browsers
   browsers: BrowserInfo[];
@@ -109,6 +109,13 @@ interface AppState {
   toasts: Toast[];
   addToast: (message: string, severity: Toast['severity']) => void;
   removeToast: (id: string) => void;
+
+  // Secrets
+  secrets: SecretSummary[];
+  setSecrets: (secrets: SecretSummary[]) => void;
+  addSecret: (secret: SecretSummary) => void;
+  updateSecret: (id: string, updates: Partial<SecretSummary>) => void;
+  removeSecret: (id: string) => void;
 }
 
 export const useAppStore = create<AppState>((set) => ({
@@ -216,4 +223,15 @@ export const useAppStore = create<AppState>((set) => ({
     })),
   removeToast: (id) =>
     set((state) => ({ toasts: state.toasts.filter((t) => t.id !== id) })),
+
+  secrets: [],
+  setSecrets: (secrets) => set({ secrets }),
+  addSecret: (secret) =>
+    set((state) => ({ secrets: [secret, ...state.secrets] })),
+  updateSecret: (id, updates) =>
+    set((state) => ({
+      secrets: state.secrets.map((s) => (s.id === id ? { ...s, ...updates } : s)),
+    })),
+  removeSecret: (id) =>
+    set((state) => ({ secrets: state.secrets.filter((s) => s.id !== id) })),
 }));

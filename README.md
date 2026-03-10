@@ -23,6 +23,7 @@ Built with [Tauri](https://tauri.app/) (Rust) and React/TypeScript, Flox runs na
 | 🔑 **BYOK / BYOM** | OpenAI, Anthropic, Groq, Ollama, or any OpenAI-compatible API |
 | ⏰ **Scheduled Automations** | Set recurring tasks that run on a schedule, even while minimized to tray |
 | 🧩 **Skills System** | Domain/keyword-triggered extensions that customize agent behavior |
+| 🔐 **Secrets Library** | Store passwords, API keys, and tokens locally; agents reference them by name — values are never sent to any LLM |
 | 💬 **Conversation History** | Full chat history with screenshots of every agent action |
 | 🌙 **Dark & Light Mode** | Comfortable UI for any environment |
 

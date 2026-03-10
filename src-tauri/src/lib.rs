@@ -6,8 +6,10 @@ mod skills;
 mod db;
 mod network;
 mod conversations;
+mod secrets;
 
 use tauri::Emitter;
+use tauri::Manager;
 
 pub fn run() {
     tauri::Builder::default()
@@ -78,6 +80,10 @@ pub fn run() {
             conversations::get_messages,
             conversations::save_message,
             network::check_network,
+            secrets::get_secrets,
+            secrets::create_secret,
+            secrets::update_secret,
+            secrets::delete_secret,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
