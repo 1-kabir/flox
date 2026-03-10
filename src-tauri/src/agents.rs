@@ -214,6 +214,14 @@ pub async fn run_agent_task(
 
     let forced_ids_ref: Option<&[String]> = forced_skill_ids.as_deref();
 
+    // Load the secrets map once at task start. Values are never sent to any LLM —
+    // they are only used at execution time to resolve {{placeholder}} references.
+    let secret_map = crate::secrets::load_secret_map().unwrap_or_default();
+
+    // Build a list of secret names for the system prompt so agents know which
+    // placeholders are available (without revealing the actual values).
+    let secret_names: Vec<String> = secret_map.keys().cloned().collect();
+
     // Load skill prompt injections
     let (skill_planner_prompt, skill_navigator_prompt) =
         crate::skills::get_relevant_skill_prompts(&app, &objective, None, forced_ids_ref).await;
@@ -229,6 +237,7 @@ pub async fn run_agent_task(
         &settings.planner_model,
         &objective,
         skill_planner_prompt.as_deref(),
+        &secret_names,
         settings.planner_model.vision || settings.planner_vision,
     )
     .await
@@ -247,9 +256,9 @@ pub async fn run_agent_task(
 
     // NAVIGATION PHASE
     let navigator_system = if let Some(extra) = skill_navigator_prompt.as_deref() {
-        format!("{}\n{}", get_navigator_system_prompt(), extra)
+        format!("{}\n{}", get_navigator_system_prompt(&secret_names), extra)
     } else {
-        get_navigator_system_prompt()
+        get_navigator_system_prompt(&secret_names)
     };
 
     let mut conversation_history: Vec<LlmMessage> = vec![
@@ -520,9 +529,12 @@ pub async fn run_agent_task(
                         }
                     }
 
-                    // Execute action
+                    // Execute action — resolve {{secret_name}} placeholders first so that
+                    // the LLM-supplied action value never contains the real secret; the
+                    // substitution happens entirely inside the Rust runtime.
+                    let resolved_action = crate::secrets::resolve_secrets_in_action(&action, &secret_map);
                     let action_result =
-                        crate::browser::execute_action(session_id.clone(), action.clone()).await;
+                        crate::browser::execute_action(session_id.clone(), resolved_action).await;
 
                     // Mid-task skill re-injection on URL change.
                     if action.action_type == "navigate" || action.action_type == "click" {
@@ -701,6 +713,7 @@ async fn call_planner(
     model: &ModelConfig,
     objective: &str,
     skill_prompt: Option<&str>,
+    secret_names: &[String],
     _vision_enabled: bool,
 ) -> Result<String, anyhow::Error> {
     let mut system_prompt = r#"You are an expert web automation planner. Your job is to break down a user's objective into a clear, step-by-step plan for browser automation.
@@ -708,6 +721,13 @@ async fn call_planner(
 Analyze the objective and create a concise plan with numbered steps. Each step should be specific and actionable (navigate to URL, click button, fill form, etc.).
 
 Keep the plan focused and efficient. Don't over-engineer it."#.to_string();
+
+    if !secret_names.is_empty() {
+        system_prompt.push_str(&format!(
+            "\n\nThe following secret placeholders are available. Use them in action values as {{{{name}}}} (double curly braces) — never try to look up or reveal the actual values:\n{}",
+            secret_names.iter().map(|n| format!("  - {{{{{}}}}}", n)).collect::<Vec<_>>().join("\n")
+        ));
+    }
 
     if let Some(extra) = skill_prompt {
         system_prompt.push_str(extra);
@@ -947,33 +967,45 @@ async fn call_llm(
     Ok(content)
 }
 
-fn get_navigator_system_prompt() -> String {
-    r##"You are an expert browser automation navigator. Your job is to execute a plan step by step using browser actions.
+fn get_navigator_system_prompt(secret_names: &[String]) -> String {
+    let mut prompt = r##"You are an expert browser automation navigator. Your job is to execute a plan step by step using browser actions.
 
 You have the following tools available:
-- navigate: Go to a URL
-- click: Click on an element (by CSS selector) or coordinates
-- type: Type text into an input field
-- scroll: Scroll the page
-- key: Press a keyboard key
-- evaluate: Execute JavaScript
-- get_page_content: Get the page HTML
-- wait: Wait for a specified time
+- navigate: Go to a URL. Example: {"action_type": "navigate", "url": "https://example.com"}
+- click: Click on an element (by CSS selector) or coordinates. Example: {"action_type": "click", "selector": "#submit-button"}
+- double_click: Double-click on an element or coordinates. Example: {"action_type": "double_click", "selector": ".item"}
+- right_click: Right-click on an element or coordinates. Example: {"action_type": "right_click", "selector": ".item"}
+- hover: Move the mouse over an element (triggers hover states/tooltips). Example: {"action_type": "hover", "selector": ".menu-item"}
+- type: Type text into an input field (focuses the element first). Example: {"action_type": "type", "selector": "input[name='q']", "value": "hello world"}
+- clear: Clear the content of an input field. Example: {"action_type": "clear", "selector": "#email"}
+- select: Select an option in a <select> dropdown by visible text. Example: {"action_type": "select", "selector": "#country", "value": "United States"}
+- check: Check or uncheck a checkbox/radio. Use value "true" to check, "false" to uncheck. Example: {"action_type": "check", "selector": "#agree", "value": "true"}
+- focus: Focus an element without clicking it. Example: {"action_type": "focus", "selector": "#email"}
+- scroll: Scroll the page or a specific element. Example: {"action_type": "scroll", "x": 0, "y": 300, "scroll_y": 300}
+- key: Press a keyboard key (Tab, Return, Escape, ArrowDown, ArrowUp, etc.). Example: {"action_type": "key", "key": "Return"}
+- evaluate: Execute JavaScript and return the result. Example: {"action_type": "evaluate", "value": "document.title"}
+- get_page_content: Get the full page HTML. Example: {"action_type": "get_page_content"}
+- get_text: Get the text content of an element. Example: {"action_type": "get_text", "selector": "h1"}
+- wait: Wait for a specified time in milliseconds. Example: {"action_type": "wait", "value": "1000"}
+- wait_for_element: Wait until an element appears in the DOM. Example: {"action_type": "wait_for_element", "selector": ".results"}
 
 For each step, respond with:
 THOUGHT: [Your reasoning about what to do next]
 ACTION: [JSON object with the action]
 
-Example actions:
-ACTION: {"action_type": "navigate", "url": "https://example.com"}
-ACTION: {"action_type": "click", "selector": "#submit-button"}
-ACTION: {"action_type": "type", "selector": "input[name='search']", "value": "hello world"}
-ACTION: {"action_type": "scroll", "x": 0, "y": 300, "scroll_y": 300}
-ACTION: {"action_type": "key", "key": "Return"}
-
 When the task is complete, respond with:
 THOUGHT: The task has been completed successfully.
-DONE"##.to_string()
+DONE"##.to_string();
+
+    if !secret_names.is_empty() {
+        prompt.push_str(&format!(
+            "\n\n## Secrets\nThe following secret placeholders are available. Use them as {{{{name}}}} in action `value` or `url` fields — NEVER try to display, log, or reason about the actual values:\n{}",
+            secret_names.iter().map(|n| format!("  - {{{{{}}}}}", n)).collect::<Vec<_>>().join("\n")
+        ));
+        prompt.push_str("\n\nExample: to type the user's GitHub token into an input, use:\nACTION: {\"action_type\": \"type\", \"selector\": \"#token\", \"value\": \"{{github_token}}\"}");
+    }
+
+    prompt
 }
 
 fn parse_navigator_response(response: &str) -> (String, Option<BrowserAction>, bool) {

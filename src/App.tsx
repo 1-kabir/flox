@@ -8,11 +8,12 @@ import { SettingsView } from './components/settings/SettingsView';
 import { AutomationsView } from './components/automations/AutomationsView';
 import { LogsView } from './components/activity/LogsView';
 import { SkillsView } from './components/skills/SkillsView';
+import { SecretsView } from './components/secrets/SecretsView';
 import { OnboardingView } from './components/onboarding/OnboardingView';
 import { ApprovalModal } from './components/chat/ApprovalModal';
 import { ToastContainer } from './components/ui/Toast';
 import { cn } from './lib/utils';
-import type { AppSettings, BrowserInfo, Automation, ApprovalRequest, Skill, Message } from './types';
+import type { AppSettings, BrowserInfo, Automation, ApprovalRequest, Skill, Message, SecretSummary } from './types';
 
 // Conversation record returned by get_conversations (no messages yet)
 interface ConversationRecord {
@@ -33,6 +34,7 @@ export default function App() {
     setAutomations,
     setConversations,
     setSkills,
+    setSecrets,
     updateAutomation,
     addApproval,
     setIsOnline,
@@ -47,18 +49,20 @@ export default function App() {
   useEffect(() => {
     const init = async () => {
       try {
-        const [loadedSettings, detectedBrowsers, automations, convRecords, skillsList] = await Promise.all([
+        const [loadedSettings, detectedBrowsers, automations, convRecords, skillsList, secretsList] = await Promise.all([
           invoke<AppSettings>('get_settings'),
           invoke<BrowserInfo[]>('detect_browsers'),
           invoke<Automation[]>('get_automations'),
           invoke<ConversationRecord[]>('get_conversations'),
           invoke<Skill[]>('get_skills'),
+          invoke<SecretSummary[]>('get_secrets'),
         ]);
 
         setSettings(loadedSettings);
         setBrowsers(detectedBrowsers);
         setAutomations(automations);
         setSkills(skillsList);
+        setSecrets(secretsList);
 
         if (detectedBrowsers.length === 0 && !browserWarningShown.current) {
           browserWarningShown.current = true;
@@ -94,7 +98,7 @@ export default function App() {
       }
     };
     init();
-  }, [setSettings, setBrowsers, setAutomations, setConversations, setSkills, addToast]);
+  }, [setSettings, setBrowsers, setAutomations, setConversations, setSkills, setSecrets, addToast]);
 
   // Poll network status every 10 seconds
   useEffect(() => {
@@ -186,6 +190,7 @@ export default function App() {
             {activeTab === 'automations' && <AutomationsView />}
             {activeTab === 'logs' && <LogsView />}
             {activeTab === 'skills' && <SkillsView />}
+            {activeTab === 'secrets' && <SecretsView />}
           </main>
 
           {/* Human-in-the-loop approval modal */}

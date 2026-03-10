@@ -156,7 +156,7 @@ async fn get_browser_version(path: &str) -> Option<String> {
     let version_str = String::from_utf8_lossy(&output.stdout).to_string();
     let version = version_str
         .split_whitespace()
-        .find(|s| s.contains('.') && s.chars().next().map(char::is_ascii_digit).unwrap_or(false))
+        .find(|s| s.contains('.') && s.chars().next().map(|c: char| c.is_ascii_digit()).unwrap_or(false))
         .map(|s| s.to_string());
 
     version
@@ -442,6 +442,305 @@ async fn execute_cdp_action(ws_url: &str, action: &BrowserAction) -> Result<Acti
                 "params": { "text": text }
             });
             send_cdp_command(&mut ws, &type_msg, cmd_id).await
+        }
+        "double_click" => {
+            if let Some(selector) = &action.selector {
+                let js = format!(
+                    "const el = document.querySelector('{}'); if(el) {{ const r = el.getBoundingClientRect(); [r.left + r.width/2, r.top + r.height/2] }} else {{ null }}",
+                    selector.replace('\'', "\\'")
+                );
+                let eval_msg = serde_json::json!({
+                    "id": cmd_id,
+                    "method": "Runtime.evaluate",
+                    "params": { "expression": js, "returnByValue": true }
+                });
+                let eval_result = send_cdp_command(&mut ws, &eval_msg, cmd_id).await?;
+                cmd_id += 1;
+
+                let coords = eval_result.data
+                    .as_ref()
+                    .and_then(|d| d["result"]["value"].as_array())
+                    .map(|arr| (
+                        arr.first().and_then(|v| v.as_f64()).unwrap_or(0.0),
+                        arr.get(1).and_then(|v| v.as_f64()).unwrap_or(0.0),
+                    ))
+                    .unwrap_or((0.0, 0.0));
+
+                let press_msg = serde_json::json!({
+                    "id": cmd_id,
+                    "method": "Input.dispatchMouseEvent",
+                    "params": { "type": "mousePressed", "x": coords.0, "y": coords.1, "button": "left", "clickCount": 2 }
+                });
+                send_cdp_command(&mut ws, &press_msg, cmd_id).await?;
+                cmd_id += 1;
+                let release_msg = serde_json::json!({
+                    "id": cmd_id,
+                    "method": "Input.dispatchMouseEvent",
+                    "params": { "type": "mouseReleased", "x": coords.0, "y": coords.1, "button": "left", "clickCount": 2 }
+                });
+                send_cdp_command(&mut ws, &release_msg, cmd_id).await
+            } else if let (Some(x), Some(y)) = (&action.x, &action.y) {
+                let press_msg = serde_json::json!({
+                    "id": cmd_id,
+                    "method": "Input.dispatchMouseEvent",
+                    "params": { "type": "mousePressed", "x": x, "y": y, "button": "left", "clickCount": 2 }
+                });
+                send_cdp_command(&mut ws, &press_msg, cmd_id).await?;
+                cmd_id += 1;
+                let release_msg = serde_json::json!({
+                    "id": cmd_id,
+                    "method": "Input.dispatchMouseEvent",
+                    "params": { "type": "mouseReleased", "x": x, "y": y, "button": "left", "clickCount": 2 }
+                });
+                send_cdp_command(&mut ws, &release_msg, cmd_id).await
+            } else {
+                Ok(ActionResult { success: false, data: None, screenshot: None, error: Some("No target specified".to_string()) })
+            }
+        }
+        "right_click" => {
+            if let Some(selector) = &action.selector {
+                let js = format!(
+                    "const el = document.querySelector('{}'); if(el) {{ const r = el.getBoundingClientRect(); [r.left + r.width/2, r.top + r.height/2] }} else {{ null }}",
+                    selector.replace('\'', "\\'")
+                );
+                let eval_msg = serde_json::json!({
+                    "id": cmd_id,
+                    "method": "Runtime.evaluate",
+                    "params": { "expression": js, "returnByValue": true }
+                });
+                let eval_result = send_cdp_command(&mut ws, &eval_msg, cmd_id).await?;
+                cmd_id += 1;
+
+                let coords = eval_result.data
+                    .as_ref()
+                    .and_then(|d| d["result"]["value"].as_array())
+                    .map(|arr| (
+                        arr.first().and_then(|v| v.as_f64()).unwrap_or(0.0),
+                        arr.get(1).and_then(|v| v.as_f64()).unwrap_or(0.0),
+                    ))
+                    .unwrap_or((0.0, 0.0));
+
+                let press_msg = serde_json::json!({
+                    "id": cmd_id,
+                    "method": "Input.dispatchMouseEvent",
+                    "params": { "type": "mousePressed", "x": coords.0, "y": coords.1, "button": "right", "clickCount": 1 }
+                });
+                send_cdp_command(&mut ws, &press_msg, cmd_id).await?;
+                cmd_id += 1;
+                let release_msg = serde_json::json!({
+                    "id": cmd_id,
+                    "method": "Input.dispatchMouseEvent",
+                    "params": { "type": "mouseReleased", "x": coords.0, "y": coords.1, "button": "right", "clickCount": 1 }
+                });
+                send_cdp_command(&mut ws, &release_msg, cmd_id).await
+            } else if let (Some(x), Some(y)) = (&action.x, &action.y) {
+                let press_msg = serde_json::json!({
+                    "id": cmd_id,
+                    "method": "Input.dispatchMouseEvent",
+                    "params": { "type": "mousePressed", "x": x, "y": y, "button": "right", "clickCount": 1 }
+                });
+                send_cdp_command(&mut ws, &press_msg, cmd_id).await?;
+                cmd_id += 1;
+                let release_msg = serde_json::json!({
+                    "id": cmd_id,
+                    "method": "Input.dispatchMouseEvent",
+                    "params": { "type": "mouseReleased", "x": x, "y": y, "button": "right", "clickCount": 1 }
+                });
+                send_cdp_command(&mut ws, &release_msg, cmd_id).await
+            } else {
+                Ok(ActionResult { success: false, data: None, screenshot: None, error: Some("No target specified".to_string()) })
+            }
+        }
+        "hover" => {
+            if let Some(selector) = &action.selector {
+                let js = format!(
+                    "const el = document.querySelector('{}'); if(el) {{ const r = el.getBoundingClientRect(); [r.left + r.width/2, r.top + r.height/2] }} else {{ null }}",
+                    selector.replace('\'', "\\'")
+                );
+                let eval_msg = serde_json::json!({
+                    "id": cmd_id,
+                    "method": "Runtime.evaluate",
+                    "params": { "expression": js, "returnByValue": true }
+                });
+                let eval_result = send_cdp_command(&mut ws, &eval_msg, cmd_id).await?;
+                cmd_id += 1;
+
+                let coords = eval_result.data
+                    .as_ref()
+                    .and_then(|d| d["result"]["value"].as_array())
+                    .map(|arr| (
+                        arr.first().and_then(|v| v.as_f64()).unwrap_or(0.0),
+                        arr.get(1).and_then(|v| v.as_f64()).unwrap_or(0.0),
+                    ))
+                    .unwrap_or((0.0, 0.0));
+
+                let move_msg = serde_json::json!({
+                    "id": cmd_id,
+                    "method": "Input.dispatchMouseEvent",
+                    "params": { "type": "mouseMoved", "x": coords.0, "y": coords.1 }
+                });
+                send_cdp_command(&mut ws, &move_msg, cmd_id).await
+            } else if let (Some(x), Some(y)) = (&action.x, &action.y) {
+                let move_msg = serde_json::json!({
+                    "id": cmd_id,
+                    "method": "Input.dispatchMouseEvent",
+                    "params": { "type": "mouseMoved", "x": x, "y": y }
+                });
+                send_cdp_command(&mut ws, &move_msg, cmd_id).await
+            } else {
+                Ok(ActionResult { success: false, data: None, screenshot: None, error: Some("No target specified".to_string()) })
+            }
+        }
+        "clear" => {
+            if let Some(selector) = &action.selector {
+                let js = format!(
+                    r#"(function() {{
+                        const el = document.querySelector('{}');
+                        if (!el) return false;
+                        el.focus();
+                        el.select();
+                        document.execCommand('delete');
+                        el.value = '';
+                        el.dispatchEvent(new Event('input', {{bubbles: true}}));
+                        el.dispatchEvent(new Event('change', {{bubbles: true}}));
+                        return true;
+                    }})()"#,
+                    selector.replace('\'', "\\'")
+                );
+                let msg = serde_json::json!({
+                    "id": cmd_id,
+                    "method": "Runtime.evaluate",
+                    "params": { "expression": js, "returnByValue": true }
+                });
+                send_cdp_command(&mut ws, &msg, cmd_id).await
+            } else {
+                Ok(ActionResult { success: false, data: None, screenshot: None, error: Some("selector is required for clear".to_string()) })
+            }
+        }
+        "select" => {
+            let option_text = action.value.as_deref().unwrap_or("");
+            if let Some(selector) = &action.selector {
+                let js = format!(
+                    r#"(function() {{
+                        const sel = document.querySelector('{}');
+                        if (!sel) return false;
+                        const options = Array.from(sel.options);
+                        const opt = options.find(o => o.text.trim() === '{}' || o.value === '{}');
+                        if (!opt) return false;
+                        sel.value = opt.value;
+                        sel.dispatchEvent(new Event('change', {{bubbles: true}}));
+                        return true;
+                    }})()"#,
+                    selector.replace('\'', "\\'"),
+                    option_text.replace('\'', "\\'"),
+                    option_text.replace('\'', "\\'"),
+                );
+                let msg = serde_json::json!({
+                    "id": cmd_id,
+                    "method": "Runtime.evaluate",
+                    "params": { "expression": js, "returnByValue": true }
+                });
+                send_cdp_command(&mut ws, &msg, cmd_id).await
+            } else {
+                Ok(ActionResult { success: false, data: None, screenshot: None, error: Some("selector is required for select".to_string()) })
+            }
+        }
+        "check" => {
+            let checked = action.value.as_deref().unwrap_or("true") != "false";
+            if let Some(selector) = &action.selector {
+                let js = format!(
+                    r#"(function() {{
+                        const el = document.querySelector('{}');
+                        if (!el) return false;
+                        if (el.checked !== {}) {{
+                            el.checked = {};
+                            el.dispatchEvent(new Event('change', {{bubbles: true}}));
+                        }}
+                        return true;
+                    }})()"#,
+                    selector.replace('\'', "\\'"),
+                    checked,
+                    checked,
+                );
+                let msg = serde_json::json!({
+                    "id": cmd_id,
+                    "method": "Runtime.evaluate",
+                    "params": { "expression": js, "returnByValue": true }
+                });
+                send_cdp_command(&mut ws, &msg, cmd_id).await
+            } else {
+                Ok(ActionResult { success: false, data: None, screenshot: None, error: Some("selector is required for check".to_string()) })
+            }
+        }
+        "focus" => {
+            if let Some(selector) = &action.selector {
+                let js = format!(
+                    "document.querySelector('{}')?.focus(); true",
+                    selector.replace('\'', "\\'")
+                );
+                let msg = serde_json::json!({
+                    "id": cmd_id,
+                    "method": "Runtime.evaluate",
+                    "params": { "expression": js }
+                });
+                send_cdp_command(&mut ws, &msg, cmd_id).await
+            } else {
+                Ok(ActionResult { success: false, data: None, screenshot: None, error: Some("selector is required for focus".to_string()) })
+            }
+        }
+        "get_text" => {
+            if let Some(selector) = &action.selector {
+                let js = format!(
+                    "document.querySelector('{}')?.innerText ?? null",
+                    selector.replace('\'', "\\'")
+                );
+                let msg = serde_json::json!({
+                    "id": cmd_id,
+                    "method": "Runtime.evaluate",
+                    "params": { "expression": js, "returnByValue": true }
+                });
+                send_cdp_command(&mut ws, &msg, cmd_id).await
+            } else {
+                Ok(ActionResult { success: false, data: None, screenshot: None, error: Some("selector is required for get_text".to_string()) })
+            }
+        }
+        "wait_for_element" => {
+            if let Some(selector) = &action.selector {
+                let timeout_ms = action.value.as_deref()
+                    .and_then(|v| v.parse::<u64>().ok())
+                    .unwrap_or(5000);
+                let poll_interval_ms = 200u64;
+                let iterations = timeout_ms / poll_interval_ms;
+                let js = format!(
+                    "!!document.querySelector('{}')",
+                    selector.replace('\'', "\\'")
+                );
+                for _ in 0..iterations {
+                    let msg = serde_json::json!({
+                        "id": cmd_id,
+                        "method": "Runtime.evaluate",
+                        "params": { "expression": js, "returnByValue": true }
+                    });
+                    let result = send_cdp_command(&mut ws, &msg, cmd_id).await?;
+                    if result.data
+                        .as_ref()
+                        .and_then(|d| d["result"]["value"].as_bool())
+                        .unwrap_or(false)
+                    {
+                        return Ok(ActionResult { success: true, data: None, screenshot: None, error: None });
+                    }
+                    cmd_id += 1;
+                    tokio::time::sleep(tokio::time::Duration::from_millis(poll_interval_ms)).await;
+                }
+                Ok(ActionResult {
+                    success: false,
+                    data: None,
+                    screenshot: None,
+                    error: Some(format!("Element '{}' not found within {}ms", selector, timeout_ms)),
+                })
+            } else {
+                Ok(ActionResult { success: false, data: None, screenshot: None, error: Some("selector is required for wait_for_element".to_string()) })
+            }
         }
         "scroll" => {
             let x = action.x.unwrap_or(0.0);

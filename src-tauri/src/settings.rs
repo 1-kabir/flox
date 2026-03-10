@@ -63,6 +63,7 @@ impl Default for AppSettings {
                 base_url: None,
                 temperature: 0.7,
                 max_tokens: 2048,
+                vision: false,
             },
             navigator_model: ModelConfig {
                 provider: "openai".to_string(),
@@ -80,6 +81,7 @@ impl Default for AppSettings {
                 base_url: None,
                 temperature: 0.1,
                 max_tokens: 512,
+                vision: false,
             },
             preferred_browser: None,
             headless_mode: false,

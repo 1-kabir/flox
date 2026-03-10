@@ -6,6 +6,7 @@ import {
   ScrollText,
   Zap,
   Puzzle,
+  KeyRound,
   Wifi,
   WifiOff,
 } from 'lucide-react';
@@ -16,6 +17,7 @@ const navItems = [
   { id: 'chat', icon: MessageSquare, label: 'Chat' },
   { id: 'automations', icon: Calendar, label: 'Automations' },
   { id: 'skills', icon: Puzzle, label: 'Skills' },
+  { id: 'secrets', icon: KeyRound, label: 'Secrets' },
   { id: 'logs', icon: ScrollText, label: 'Logs' },
   { id: 'settings', icon: Settings, label: 'Settings' },
 ] as const;

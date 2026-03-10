@@ -10,9 +10,10 @@ A complete reference to every feature in Flox. This guide assumes you've already
 2. [Chat](#chat)
 3. [Automations](#automations)
 4. [Skills](#skills)
-5. [Activity Logs](#activity-logs)
-6. [Settings](#settings)
-7. [System Tray](#system-tray)
+5. [Secrets](#secrets)
+6. [Activity Logs](#activity-logs)
+7. [Settings](#settings)
+8. [System Tray](#system-tray)
 
 ---
 
@@ -29,8 +30,9 @@ Flox's main window is divided into two parts:
 |---|---|---|
 | 💬 | Chat | Run tasks and view conversation history |
 | ⏰ | Automations | Schedule recurring tasks |
-| 📋 | Activity | Real-time agent action logs |
 | 🧩 | Skills | Browse and manage extensions |
+| 🔑 | Secrets | Store and manage sensitive values |
+| 📋 | Logs | Real-time agent action logs |
 | ⚙️ | Settings | Configure models, keys, and behavior |
 
 ### Theme
@@ -186,6 +188,46 @@ A skill can:
 ### Enabling and Disabling Skills
 
 Each skill has a toggle on its card. Disabled skills are ignored by the agents even if their trigger matches.
+
+---
+
+## Secrets
+
+The Secrets library lets you store sensitive values (passwords, API keys, tokens) locally on your device. Agents **never** see the actual values — they reference secrets by name using `{{placeholder}}` syntax, and Flox substitutes the real value just before the browser action executes.
+
+### Adding a Secret
+
+1. Click the **Secrets** tab (🔑 key icon) in the sidebar.
+2. Click **Add Secret**.
+3. Fill in:
+   - **Name** — A short, snake_case identifier (e.g. `github_api_key`). This becomes the `{{placeholder}}`.
+   - **Description** _(optional)_ — A note for yourself.
+   - **Value** — The actual secret. Masked by default.
+4. Click **Add Secret**.
+
+### Using a Secret in a Task
+
+Reference any secret by wrapping its name in double curly braces:
+
+```
+Log in to GitHub with username "johndoe" and password {{github_password}}
+```
+
+```
+Open the dashboard and enter {{openai_api_key}} in the API key field, then click Save
+```
+
+The agent will type the placeholder text in its action plan. Just before the CDP `type` command is sent to the browser, Flox replaces `{{github_password}}` with the stored value — the LLM only ever saw the placeholder.
+
+### Copy the Placeholder
+
+On each secret card, click the `{{name}}` badge to copy the placeholder to your clipboard, then paste it directly into your task prompt.
+
+### Security Notes
+
+- Secret values are stored in `flox.db` (local SQLite) and never transmitted to any LLM API or Flox server.
+- For added security, enable OS-level full-disk encryption (FileVault, BitLocker, LUKS).
+- See [Secrets](secrets.md) for a full security model description.
 
 ---
 

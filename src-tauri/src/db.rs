@@ -61,6 +61,15 @@ pub fn init(app_data_dir: PathBuf) -> SqlResult<()> {
             summary          TEXT NOT NULL,
             steps            INTEGER NOT NULL DEFAULT 0
         );
+
+        CREATE TABLE IF NOT EXISTS secrets (
+            id               TEXT PRIMARY KEY,
+            name             TEXT NOT NULL UNIQUE,
+            description      TEXT NOT NULL DEFAULT '',
+            value            TEXT NOT NULL,
+            created_at       TEXT NOT NULL,
+            updated_at       TEXT NOT NULL
+        );
         ",
     )?;
 
