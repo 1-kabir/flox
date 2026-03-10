@@ -13,6 +13,8 @@ export interface ModelConfig {
   base_url?: string;
   temperature: number;
   max_tokens: number;
+  /** When true, send a screenshot to the model (requires a vision-capable model). */
+  vision?: boolean;
 }
 
 export type HilRoutingMode = 'all' | 'none' | 'auto';

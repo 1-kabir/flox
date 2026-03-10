@@ -174,40 +174,6 @@ export const SettingsView: React.FC = () => {
                 }
               />
             </div>
-
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium text-gray-200">Navigator Vision</p>
-                <p className="text-xs text-gray-500">
-                  {localSettings.navigator_vision
-                    ? 'Navigator sees screenshots'
-                    : 'Navigator reads page structure instead of screenshots'}
-                </p>
-              </div>
-              <Toggle
-                checked={localSettings.navigator_vision}
-                onChange={(v) =>
-                  setLocalSettings((s) => ({ ...s, navigator_vision: v }))
-                }
-              />
-            </div>
-
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium text-gray-200">Planner Vision</p>
-                <p className="text-xs text-gray-500">
-                  {localSettings.planner_vision
-                    ? 'Planner sees screenshots'
-                    : 'Planner uses text context only (faster/cheaper)'}
-                </p>
-              </div>
-              <Toggle
-                checked={localSettings.planner_vision}
-                onChange={(v) =>
-                  setLocalSettings((s) => ({ ...s, planner_vision: v }))
-                }
-              />
-            </div>
           </div>
         </section>
 

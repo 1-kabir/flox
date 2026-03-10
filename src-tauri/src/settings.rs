@@ -10,6 +10,10 @@ pub struct ModelConfig {
     pub base_url: Option<String>,
     pub temperature: f32,
     pub max_tokens: u32,
+    /// When true, send a screenshot of the page to the model (vision / multimodal mode).
+    /// Requires a vision-capable model (e.g. gpt-4o, gemini-1.5-pro, llava).
+    #[serde(default)]
+    pub vision: bool,
 }
 
 /// Controls how risky browser actions are routed for human review.
@@ -67,6 +71,7 @@ impl Default for AppSettings {
                 base_url: None,
                 temperature: 0.3,
                 max_tokens: 1024,
+                vision: true,
             },
             verifier_model: ModelConfig {
                 provider: "openai".to_string(),
