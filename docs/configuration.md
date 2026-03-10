@@ -32,48 +32,106 @@ To reset all settings to factory defaults, quit Flox and delete (or rename) `flo
 
 ## Provider & API Keys
 
-Flox supports the following AI providers. You can mix and match — for example, use OpenAI for the Planner and Groq for the Verifier.
+Flox uses the OpenAI-compatible chat completions API format, which means **any provider that exposes an OpenAI-compatible endpoint will work**. You can mix and match providers across agents — for example, use Gemini for the Planner, Groq for the Verifier, and a local Ollama model for the Navigator.
+
+Each agent (Planner, Navigator, Verifier) has its own independent model configuration: provider, model name, API key, base URL, temperature, max tokens, and vision toggle.
 
 ### OpenAI
 
 - **Provider name**: `openai`
-- **Base URL**: `https://api.openai.com/v1` (auto-filled)
+- **Default Base URL**: `https://api.openai.com/v1` (auto-filled)
 - **How to get a key**: [platform.openai.com/api-keys](https://platform.openai.com/api-keys)
-- **Supported models**: `gpt-4o`, `gpt-4o-mini`, `gpt-4-turbo`, `gpt-3.5-turbo`, and all other chat completion models
+- **Suggested models**: `gpt-4o`, `gpt-4o-mini`, `gpt-4-turbo`, `gpt-3.5-turbo`, `o1`, `o1-mini`
+- **Vision-capable models**: `gpt-4o`, `gpt-4o-mini`, `gpt-4-turbo`
 
 ### Anthropic
 
 - **Provider name**: `anthropic`
-- **Base URL**: `https://api.anthropic.com/v1` (auto-filled)
+- **Default Base URL**: `https://api.anthropic.com/v1` (auto-filled)
 - **How to get a key**: [console.anthropic.com](https://console.anthropic.com/)
-- **Supported models**: `claude-3-5-sonnet-latest`, `claude-3-haiku-20240307`, and all other current models
+- **Suggested models**: `claude-3-5-sonnet-20241022`, `claude-3-5-haiku-20241022`, `claude-3-opus-20240229`
 
 > **Note:** Flox calls Anthropic's API via an OpenAI-compatible adapter. Make sure to use the correct model names as listed in the Anthropic console.
+
+### Google Gemini
+
+- **Provider name**: `gemini`
+- **Default Base URL**: `https://generativelanguage.googleapis.com/v1beta/openai` (auto-filled)
+- **How to get a key**: [aistudio.google.com/app/apikey](https://aistudio.google.com/app/apikey)
+- **Suggested models**: `gemini-2.0-flash`, `gemini-2.0-flash-lite`, `gemini-1.5-pro`, `gemini-1.5-flash`
+- **Vision-capable models**: `gemini-2.0-flash`, `gemini-1.5-pro`, `gemini-1.5-flash`
+
+> **Note:** Google's OpenAI-compatible endpoint is currently at `/v1beta/openai`. This is the officially documented path as of 2025. If Google promotes it to `/v1`, update the Base URL field accordingly.
 
 ### Groq
 
 - **Provider name**: `groq`
-- **Base URL**: `https://api.groq.com/openai/v1` (auto-filled)
+- **Default Base URL**: `https://api.groq.com/openai/v1` (auto-filled)
 - **How to get a key**: [console.groq.com](https://console.groq.com/)
-- **Supported models**: `llama3-70b-8192`, `llama3-8b-8192`, `mixtral-8x7b-32768`, and others
+- **Suggested models**: `llama-3.3-70b-versatile`, `llama-3.1-8b-instant`, `mixtral-8x7b-32768`, `llama-3.2-11b-vision-preview`
 - **Free tier**: Yes — rate limits apply
+
+### Cerebras
+
+- **Provider name**: `cerebras`
+- **Default Base URL**: `https://api.cerebras.ai/v1` (auto-filled)
+- **How to get a key**: [cloud.cerebras.ai](https://cloud.cerebras.ai/)
+- **Suggested models**: `llama3.1-8b`, `llama3.1-70b`, `llama3.3-70b`
+- **Strengths**: Extremely low latency inference
+
+### Cohere
+
+- **Provider name**: `cohere`
+- **Default Base URL**: `https://api.cohere.com/compatibility/v1` (auto-filled)
+- **How to get a key**: [dashboard.cohere.com/api-keys](https://dashboard.cohere.com/api-keys)
+- **Suggested models**: `command-r-plus`, `command-r`, `command`
+
+### Mistral
+
+- **Provider name**: `mistral`
+- **Default Base URL**: `https://api.mistral.ai/v1` (auto-filled)
+- **How to get a key**: [console.mistral.ai](https://console.mistral.ai/)
+- **Suggested models**: `mistral-large-latest`, `mistral-small-latest`, `codestral-latest`, `open-mistral-7b`
+
+### Together AI
+
+- **Provider name**: `together`
+- **Default Base URL**: `https://api.together.xyz/v1` (auto-filled)
+- **How to get a key**: [api.together.ai/settings/api-keys](https://api.together.ai/settings/api-keys)
+- **Suggested models**: `meta-llama/Meta-Llama-3.1-70B-Instruct-Turbo`, `mistralai/Mixtral-8x7B-Instruct-v0.1`
+
+### OpenRouter
+
+- **Provider name**: `openrouter`
+- **Default Base URL**: `https://openrouter.ai/api/v1` (auto-filled)
+- **How to get a key**: [openrouter.ai/keys](https://openrouter.ai/keys)
+- **Supported models**: Any model available on OpenRouter (use the provider/model format, e.g. `openai/gpt-4o`, `anthropic/claude-3-5-sonnet`)
+- **Strengths**: Single API key to access hundreds of models from every major provider
+
+### Perplexity
+
+- **Provider name**: `perplexity`
+- **Default Base URL**: `https://api.perplexity.ai` (auto-filled)
+- **How to get a key**: [perplexity.ai/settings/api](https://perplexity.ai/settings/api)
+- **Suggested models**: `sonar-pro`, `sonar`, `sonar-deep-research`
 
 ### Ollama (Local)
 
 - **Provider name**: `ollama`
-- **Base URL**: `http://localhost:11434/v1` (default)
-- **How to set up**: Install [Ollama](https://ollama.ai/) and run `ollama pull llama3`
-- **Supported models**: Any model you have pulled locally (e.g. `llama3`, `mistral`, `phi3`)
+- **Default Base URL**: `http://localhost:11434/v1` (auto-filled)
+- **How to set up**: Install [Ollama](https://ollama.ai/) and run `ollama pull llama3.2`
+- **Suggested models**: `llama3.2`, `llava` (vision), `qwen2.5`, `mistral`, `phi3`
+- **Vision-capable models**: `llava`, `llava-llama3`, `llama3.2-vision`
 - **Cost**: Free — runs entirely on your machine
 - **Privacy**: Maximum — no data leaves your computer
 
-> **Tip:** Ollama models vary in quality. `llama3` (8B) is a good starting point. For best results, use `llama3:70b` if your hardware supports it.
+> **Tip:** For vision tasks with Ollama, use `llava` or `llama3.2-vision`.
 
-### Custom OpenAI-Compatible API
+### Custom (OpenAI-compatible)
 
-If you use a self-hosted LLM server (e.g. LM Studio, LocalAI, OpenRouter) or an enterprise deployment:
+For any other provider or self-hosted server (LM Studio, LocalAI, vLLM, etc.):
 
-- Set **Provider** to `openai`
+- Set **Provider** to `custom`
 - Set **Base URL** to your custom endpoint (e.g. `http://localhost:1234/v1` for LM Studio)
 - Set **API Key** to whatever credential your server requires (can be a dummy value for local setups)
 - Set **Model** to the model name your server expects
@@ -82,7 +140,7 @@ If you use a self-hosted LLM server (e.g. LM Studio, LocalAI, OpenRouter) or an 
 
 ## Agent Model Configuration
 
-Each of Flox's three agents has its own model configuration. This lets you optimize cost vs. quality.
+Each of Flox's three agents has its own independent model configuration. This lets you optimize cost vs. quality and mix providers freely.
 
 ### Planner Agent
 
@@ -90,10 +148,11 @@ The Planner reads your instruction and creates a step-by-step plan for the Navig
 
 | Setting | Recommended value | Notes |
 |---|---|---|
-| **Model** | `gpt-4o` or `claude-3-5-sonnet-latest` | Needs strong reasoning for complex tasks |
+| **Provider** | Any | Needs strong reasoning for complex tasks |
+| **Model** | `gpt-4o`, `claude-3-5-sonnet-20241022`, `gemini-2.0-flash` | |
 | **Temperature** | `0.7` | Some creativity helps with planning |
 | **Max Tokens** | `2048` | Plans can be verbose |
-| **Enable Vision** | Optional | Planner rarely needs screenshots |
+| **Vision Mode** | Off | Planner rarely needs screenshots |
 
 ### Navigator Agent
 
@@ -101,12 +160,13 @@ The Navigator executes actions in the browser: navigating to URLs, clicking elem
 
 | Setting | Recommended value | Notes |
 |---|---|---|
-| **Model** | `gpt-4o` | Vision is highly recommended for reliable element selection |
+| **Provider** | Any (vision-capable preferred) | |
+| **Model** | `gpt-4o`, `gemini-1.5-pro`, `llava` (Ollama) | Use a vision-capable model when Vision Mode is on |
 | **Temperature** | `0.3` | Low temperature for precise, deterministic actions |
 | **Max Tokens** | `1024` | Actions are short; doesn't need many tokens |
-| **Enable Vision** | **Yes** (strongly recommended) | Lets the Navigator see the page and pick correct elements |
+| **Vision Mode** | **On** (strongly recommended) | Lets the Navigator see the page and pick correct elements |
 
-> **Without vision**, the Navigator relies solely on the page's DOM structure. With vision, it can see the page visually and make more reliable decisions about which element to click. Vision increases cost but substantially improves accuracy.
+> **Without vision**, the Navigator relies solely on the page's DOM structure. With vision enabled, it sends a screenshot with each request so it can see the page visually. Vision increases cost but substantially improves accuracy. The model you select must support vision/multimodal input.
 
 ### Verifier Agent
 
@@ -114,10 +174,11 @@ The Verifier checks each proposed action for safety and correctness before it is
 
 | Setting | Recommended value | Notes |
 |---|---|---|
-| **Model** | `gpt-4o-mini` or `llama3-8b` | Simple yes/no decisions; smaller model is sufficient |
+| **Provider** | Any | Simple yes/no decisions; smaller/cheaper model is fine |
+| **Model** | `gpt-4o-mini`, `llama-3.1-8b-instant`, `gemini-2.0-flash-lite` | |
 | **Temperature** | `0.1` | Near-deterministic for consistent safety checks |
 | **Max Tokens** | `512` | Short verification responses |
-| **Enable Vision** | No | Usually not needed for verification |
+| **Vision Mode** | Off | Usually not needed for verification |
 
 ---
 
@@ -206,43 +267,63 @@ When headless mode is enabled, browsers launched by Flox open without a visible 
 
 Best for: Getting started, light tasks, budget-conscious users.
 
-| Agent | Provider | Model | Temperature |
-|---|---|---|---|
-| Planner | Groq | `llama3-70b-8192` | 0.7 |
-| Navigator | Groq | `llama3-70b-8192` | 0.3 |
-| Verifier | Groq | `llama3-8b-8192` | 0.1 |
+| Agent | Provider | Model | Vision | Temperature |
+|---|---|---|---|---|
+| Planner | Groq | `llama-3.3-70b-versatile` | Off | 0.7 |
+| Navigator | Groq | `llama-3.2-11b-vision-preview` | On | 0.3 |
+| Verifier | Groq | `llama-3.1-8b-instant` | Off | 0.1 |
 
 ### Balanced (OpenAI — moderate cost)
 
 Best for: Most users, good accuracy at reasonable cost.
 
-| Agent | Provider | Model | Temperature |
-|---|---|---|---|
-| Planner | OpenAI | `gpt-4o` | 0.7 |
-| Navigator | OpenAI | `gpt-4o` (vision on) | 0.3 |
-| Verifier | OpenAI | `gpt-4o-mini` | 0.1 |
+| Agent | Provider | Model | Vision | Temperature |
+|---|---|---|---|---|
+| Planner | OpenAI | `gpt-4o` | Off | 0.7 |
+| Navigator | OpenAI | `gpt-4o` | **On** | 0.3 |
+| Verifier | OpenAI | `gpt-4o-mini` | Off | 0.1 |
 
 ### Maximum Quality (OpenAI + Anthropic)
 
 Best for: Complex multi-step tasks where accuracy is critical.
 
-| Agent | Provider | Model | Temperature |
-|---|---|---|---|
-| Planner | Anthropic | `claude-3-5-sonnet-latest` | 0.7 |
-| Navigator | OpenAI | `gpt-4o` (vision on) | 0.3 |
-| Verifier | OpenAI | `gpt-4o-mini` | 0.1 |
+| Agent | Provider | Model | Vision | Temperature |
+|---|---|---|---|---|
+| Planner | Anthropic | `claude-3-5-sonnet-20241022` | Off | 0.7 |
+| Navigator | OpenAI | `gpt-4o` | **On** | 0.3 |
+| Verifier | OpenAI | `gpt-4o-mini` | Off | 0.1 |
+
+### Google Gemini
+
+Best for: Users who prefer Google's ecosystem.
+
+| Agent | Provider | Model | Vision | Temperature |
+|---|---|---|---|---|
+| Planner | Gemini | `gemini-2.0-flash` | Off | 0.7 |
+| Navigator | Gemini | `gemini-2.0-flash` | **On** | 0.3 |
+| Verifier | Gemini | `gemini-2.0-flash-lite` | Off | 0.1 |
 
 ### Privacy-First (Ollama, fully local)
 
 Best for: Users who want complete privacy; no data leaves your machine.
 
-| Agent | Provider | Model | Temperature |
-|---|---|---|---|
-| Planner | Ollama | `llama3:70b` | 0.7 |
-| Navigator | Ollama | `llava` (multimodal) | 0.3 |
-| Verifier | Ollama | `llama3` | 0.1 |
+| Agent | Provider | Model | Vision | Temperature |
+|---|---|---|---|---|
+| Planner | Ollama | `llama3.2` | Off | 0.7 |
+| Navigator | Ollama | `llava` | **On** | 0.3 |
+| Verifier | Ollama | `llama3.2` | Off | 0.1 |
 
 > Note: Local models are slower and less accurate than cloud models, especially for complex web tasks.
+
+### Mixed Providers (Cost-Optimized)
+
+Best for: Power users who want the best of each provider at minimum cost.
+
+| Agent | Provider | Model | Vision | Temperature |
+|---|---|---|---|---|
+| Planner | Mistral | `mistral-large-latest` | Off | 0.7 |
+| Navigator | OpenAI | `gpt-4o-mini` | **On** | 0.3 |
+| Verifier | Cerebras | `llama3.1-8b` | Off | 0.1 |
 
 ---
 
@@ -256,3 +337,4 @@ To reset all settings (including API keys, agent configuration, and behavior):
 4. Relaunch Flox — the onboarding wizard will appear again.
 
 > **Warning:** Deleting `flox.db` also removes all conversation history, automations, and skills. Back it up first if you want to preserve those.
+

@@ -229,19 +229,21 @@ Settings are organized into tabs:
 
 ### Models
 
-Configure the AI model for each of the three agents:
+Configure the AI model for each of the three agents. Each agent can use a **different provider, model, and API key** — mix and match freely:
 
 | Setting | Description |
 |---|---|
-| **Provider** | OpenAI / Anthropic / Groq / Ollama / Custom |
-| **Model** | The specific model name (e.g. `gpt-4o`, `claude-3-5-sonnet-latest`) |
+| **Provider** | OpenAI / Anthropic / Google Gemini / Groq / Cerebras / Cohere / Mistral / Together AI / OpenRouter / Perplexity / Ollama / Custom |
+| **Model** | The specific model name (e.g. `gpt-4o`, `gemini-2.0-flash`, `llama-3.3-70b-versatile`) |
 | **API Key** | Your API key for this provider |
-| **Base URL** | (Optional) Custom API endpoint for OpenAI-compatible providers |
+| **Base URL** | API endpoint (auto-filled for known providers; override for custom/self-hosted setups) |
 | **Temperature** | Creativity level (0 = deterministic, 1 = creative). Lower is better for automation |
 | **Max Tokens** | Maximum response length for this agent |
-| **Enable Vision** | (Navigator only) Send screenshots to the model for visual understanding |
+| **Vision Mode** | Send a screenshot of the page to this model (requires a vision-capable model) |
 
-See [Configuration](configuration.md) for a full breakdown of recommended settings.
+> **Vision Mode**: When enabled for an agent, Flox sends a screenshot of the current browser state alongside each request. This lets vision-capable models (e.g. GPT-4o, Gemini 1.5 Pro, LLaVA) see the page visually rather than relying only on the DOM. If Vision Mode is off, Flox extracts structured page text instead.
+
+See [Configuration](configuration.md) for a full breakdown of supported providers and recommended settings.
 
 ### Behavior
 

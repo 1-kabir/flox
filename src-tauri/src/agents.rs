@@ -229,7 +229,7 @@ pub async fn run_agent_task(
         &settings.planner_model,
         &objective,
         skill_planner_prompt.as_deref(),
-        settings.planner_vision,
+        settings.planner_model.vision || settings.planner_vision,
     )
     .await
     .map_err(|e| format!("Planner error: {}", e))?;
@@ -306,10 +306,11 @@ pub async fn run_agent_task(
             screenshot.clone(),
         );
 
-        // If navigator_vision is disabled, extract page context as text instead.
+        // If the navigator model does not have vision enabled, extract page context as text instead.
         // Always extract DOM context when vision is off, regardless of whether
         // screenshots are enabled — without this the navigator has no context at all.
-        let page_context = if !settings.navigator_vision {
+        let navigator_vision = settings.navigator_model.vision || settings.navigator_vision;
+        let page_context = if !navigator_vision {
             let js = r#"JSON.stringify({
   url: location.href,
   title: document.title,
@@ -345,7 +346,7 @@ pub async fn run_agent_task(
         let nav_response = call_navigator(
             &settings.navigator_model,
             &conversation_history,
-            if settings.navigator_vision { screenshot.as_deref() } else { None },
+            if navigator_vision { screenshot.as_deref() } else { None },
             page_context.as_deref(),
         )
         .await;
@@ -890,11 +891,18 @@ async fn call_llm(
 ) -> Result<String, anyhow::Error> {
     let base_url = model.base_url.as_deref().unwrap_or(
         match model.provider.as_str() {
-            "openai" => "https://api.openai.com/v1",
-            "anthropic" => "https://api.anthropic.com/v1",
-            "groq" => "https://api.groq.com/openai/v1",
-            "ollama" => "http://localhost:11434/v1",
-            _ => "https://api.openai.com/v1",
+            "openai"      => "https://api.openai.com/v1",
+            "anthropic"   => "https://api.anthropic.com/v1",
+            "gemini"      => "https://generativelanguage.googleapis.com/v1beta/openai",
+            "groq"        => "https://api.groq.com/openai/v1",
+            "cerebras"    => "https://api.cerebras.ai/v1",
+            "cohere"      => "https://api.cohere.com/compatibility/v1",
+            "mistral"     => "https://api.mistral.ai/v1",
+            "together"    => "https://api.together.xyz/v1",
+            "openrouter"  => "https://openrouter.ai/api/v1",
+            "perplexity"  => "https://api.perplexity.ai",
+            "ollama"      => "http://localhost:11434/v1",
+            _             => "https://api.openai.com/v1",
         }
     );
 
