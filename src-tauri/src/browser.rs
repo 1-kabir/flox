@@ -146,6 +146,18 @@ pub async fn detect_browsers() -> Result<Vec<BrowserInfo>, String> {
     Ok(browsers)
 }
 
+/// Returns a realistic desktop user-agent string based on the browser executable name.
+fn derive_user_agent(browser_path: &str) -> String {
+    let lower = browser_path.to_lowercase();
+    if lower.contains("brave") {
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36".to_string()
+    } else if lower.contains("edge") || lower.contains("msedge") {
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36 Edg/124.0.0.0".to_string()
+    } else {
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36".to_string()
+    }
+}
+
 async fn get_browser_version(path: &str) -> Option<String> {
     let output = tokio::process::Command::new(path)
         .arg("--version")
@@ -164,14 +176,26 @@ async fn get_browser_version(path: &str) -> Option<String> {
 
 #[tauri::command]
 pub async fn launch_browser(
+    app: tauri::AppHandle,
     browser_path: String,
     headless: bool,
     session_id: String,
 ) -> Result<String, String> {
     let debug_port = find_free_port().await.map_err(|e| e.to_string())?;
 
+    // Derive a persistent profile directory so cookies/sessions survive across runs.
+    let profile_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("Failed to resolve app data dir: {}", e))?
+        .join("browser-profile");
+    std::fs::create_dir_all(&profile_dir)
+        .map_err(|e| format!("Failed to create browser profile dir: {}", e))?;
+    let profile_dir_str = profile_dir.to_string_lossy().to_string();
+
     let mut args = vec![
         format!("--remote-debugging-port={}", debug_port),
+        format!("--user-data-dir={}", profile_dir_str),
         "--no-first-run".to_string(),
         "--no-default-browser-check".to_string(),
         "--disable-background-networking".to_string(),
@@ -185,14 +209,19 @@ pub async fn launch_browser(
         "--disable-translate".to_string(),
         "--metrics-recording-only".to_string(),
         "--safebrowsing-disable-auto-update".to_string(),
-        "--password-store=basic".to_string(),
-        "--use-mock-keychain".to_string(),
+        // Suppress automation detection in both visible and headless modes —
+        // GitHub, Perplexity and others check this flag regardless of headless.
+        "--disable-blink-features=AutomationControlled".to_string(),
         "about:blank".to_string(),
     ];
 
     if headless {
         args.push("--headless=new".to_string());
         args.push("--disable-gpu".to_string());
+        args.push("--window-size=1280,800".to_string());
+        // Derive a realistic user-agent from the browser executable name.
+        let ua = derive_user_agent(&browser_path);
+        args.push(format!("--user-agent={}", ua));
     }
 
     let child = Command::new(&browser_path)

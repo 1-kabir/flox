@@ -352,11 +352,30 @@ pub async fn run_agent_task(
             None
         };
 
+        // Inject scratchpad context into the conversation as a user message so the
+        // navigator can reference previously stored values without bloating the system prompt.
+        let scratchpad_entries = crate::scratchpad::scratchpad_read_all(&task_id)
+            .unwrap_or_default();
+        let scratchpad_context = if scratchpad_entries.is_empty() {
+            None
+        } else {
+            let map: serde_json::Map<String, serde_json::Value> = scratchpad_entries
+                .iter()
+                .map(|(k, v)| (k.clone(), serde_json::Value::String(v.clone())))
+                .collect();
+            Some(format!(
+                "[Scratchpad: {}]",
+                serde_json::to_string(&serde_json::Value::Object(map))
+                    .unwrap_or_default()
+            ))
+        };
+
         let nav_response = call_navigator(
             &settings.navigator_model,
             &conversation_history,
             if navigator_vision { screenshot.as_deref() } else { None },
             page_context.as_deref(),
+            scratchpad_context.as_deref(),
         )
         .await;
 
@@ -373,6 +392,53 @@ pub async fn run_agent_task(
                         timestamp: chrono::Utc::now().to_rfc3339(),
                     });
                     emit_progress(&app, &task_id, "navigator", &thought, None);
+
+                    // Collect scratchpad for the completion event.
+                    let sp_entries = crate::scratchpad::scratchpad_read_all(&task_id)
+                        .unwrap_or_default();
+                    let sp_map: serde_json::Map<String, serde_json::Value> = sp_entries
+                        .iter()
+                        .map(|(k, v)| (k.clone(), serde_json::Value::String(v.clone())))
+                        .collect();
+                    let result_url = sp_map
+                        .get("result_url")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string());
+
+                    // Emit task_completed event for the frontend.
+                    let _ = app.emit(
+                        "task_completed",
+                        serde_json::json!({
+                            "task_id": task_id,
+                            "session_id": session_id,
+                            "objective": objective,
+                            "final_thought": thought,
+                            "scratchpad": serde_json::Value::Object(sp_map)
+                        }),
+                    );
+
+                    // OS notification.
+                    #[cfg(not(test))]
+                    {
+                        use tauri_plugin_notification::NotificationExt;
+                        let truncated_thought = if thought.chars().count() > 120 {
+                            format!("{}…", thought.chars().take(120).collect::<String>())
+                        } else {
+                            thought.clone()
+                        };
+                        let body = if let Some(url) = &result_url {
+                            format!("{}\nView: {}", truncated_thought, url)
+                        } else {
+                            truncated_thought
+                        };
+                        let _ = app
+                            .notification()
+                            .builder()
+                            .title("Flox — Task Complete")
+                            .body(&body)
+                            .show();
+                    }
+
                     break;
                 }
 
@@ -532,11 +598,59 @@ pub async fn run_agent_task(
                     // Execute action — resolve {{secret_name}} placeholders first so that
                     // the LLM-supplied action value never contains the real secret; the
                     // substitution happens entirely inside the Rust runtime.
-                    let resolved_action = crate::secrets::resolve_secrets_in_action(&action, &secret_map);
-                    let action_result =
-                        crate::browser::execute_action(session_id.clone(), resolved_action).await;
 
-                    // Mid-task skill re-injection on URL change.
+                    // Handle scratchpad actions before hitting the browser CDP.
+                    // Note: scratchpad actions use `selector` as the key field and `value` as
+                    // the stored value, reusing the existing BrowserAction schema so no new
+                    // types are needed on the LLM side.
+                    let action_result = match action.action_type.as_str() {
+                        "scratchpad_write" => {
+                            let key = action.selector.as_deref().unwrap_or("");
+                            let val = action.value.as_deref().unwrap_or("");
+                            match crate::scratchpad::scratchpad_write(&task_id, key, val) {
+                                Ok(()) => Ok(ActionResult {
+                                    success: true,
+                                    data: Some(serde_json::json!(format!(
+                                        "Stored '{}' in scratchpad",
+                                        key
+                                    ))),
+                                    screenshot: None,
+                                    error: None,
+                                }),
+                                Err(e) => Ok(ActionResult {
+                                    success: false,
+                                    data: None,
+                                    screenshot: None,
+                                    error: Some(e),
+                                }),
+                            }
+                        }
+                        "scratchpad_read" => {
+                            let key = action.selector.as_deref().unwrap_or("");
+                            match crate::scratchpad::scratchpad_read(&task_id, key) {
+                                Ok(maybe_val) => Ok(ActionResult {
+                                    success: true,
+                                    data: maybe_val.map(|v| serde_json::json!(v)),
+                                    screenshot: None,
+                                    error: None,
+                                }),
+                                Err(e) => Ok(ActionResult {
+                                    success: false,
+                                    data: None,
+                                    screenshot: None,
+                                    error: Some(e),
+                                }),
+                            }
+                        }
+                        _ => {
+                            let resolved_action =
+                                crate::secrets::resolve_secrets_in_action(&action, &secret_map);
+                            crate::browser::execute_action(session_id.clone(), resolved_action)
+                                .await
+                        }
+                    };
+
+                    // Mid-task skill re-injection on URL change (skip for scratchpad actions).
                     if action.action_type == "navigate" || action.action_type == "click" {
                         if let Ok(new_url) = get_current_url(&session_id).await {
                             if last_url.as_deref() != Some(&new_url) {
@@ -643,6 +757,12 @@ pub async fn run_agent_task(
         tasks.remove(&task_id);
     }
 
+    // Only clear the scratchpad on successful completion so that entries remain
+    // available for debugging when a task fails or is stopped mid-way.
+    if agent_task.status == "completed" {
+        let _ = crate::scratchpad::scratchpad_clear(&task_id);
+    }
+
     Ok(agent_task)
 }
 
@@ -746,13 +866,14 @@ async fn call_navigator(
     history: &[LlmMessage],
     screenshot: Option<&str>,
     page_context: Option<&str>,
+    scratchpad_context: Option<&str>,
 ) -> Result<(String, Option<BrowserAction>, bool), anyhow::Error> {
     let mut messages: Vec<serde_json::Value> = history
         .iter()
         .map(|m| serde_json::json!({"role": m.role, "content": m.content}))
         .collect();
 
-    // Append page context or screenshot to the last user message.
+    // Append page context, scratchpad context, or screenshot to the last user message.
     if let Some(last) = messages.last_mut().filter(|m| m["role"] == "user") {
         if let Some(ss) = screenshot {
             if let Some(text) = last["content"].as_str().map(|s| s.to_string()) {
@@ -762,11 +883,20 @@ async fn call_navigator(
                 ]);
             }
         } else if let Some(ctx) = page_context {
+            let mut combined = if let Some(existing) = last["content"].as_str() {
+                format!("{}\n\n[Page context]\n{}", existing, ctx)
+            } else {
+                format!("[Page context]\n{}", ctx)
+            };
+            if let Some(sp) = scratchpad_context {
+                combined.push_str(&format!("\n\n{}", sp));
+            }
+            last["content"] = serde_json::json!(combined);
+        } else if let Some(sp) = scratchpad_context {
             if let Some(existing) = last["content"].as_str() {
-                last["content"] = serde_json::json!(format!(
-                    "{}\n\n[Page context]\n{}",
-                    existing, ctx
-                ));
+                last["content"] = serde_json::json!(format!("{}\n\n{}", existing, sp));
+            } else {
+                last["content"] = serde_json::json!(sp);
             }
         }
     }
@@ -988,6 +1118,8 @@ You have the following tools available:
 - get_text: Get the text content of an element. Example: {"action_type": "get_text", "selector": "h1"}
 - wait: Wait for a specified time in milliseconds. Example: {"action_type": "wait", "value": "1000"}
 - wait_for_element: Wait until an element appears in the DOM. Example: {"action_type": "wait_for_element", "selector": ".results"}
+- scratchpad_write: Store a value for later retrieval within this task. Uses `selector` as the key and `value` as the value. Example: {"action_type": "scratchpad_write", "selector": "target_repo", "value": "1-kabir/flox"}
+- scratchpad_read: Retrieve a previously stored value by key (returned in the action result). Example: {"action_type": "scratchpad_read", "selector": "target_repo"}
 
 For each step, respond with:
 THOUGHT: [Your reasoning about what to do next]

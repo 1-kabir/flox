@@ -7,6 +7,7 @@ mod db;
 mod network;
 mod conversations;
 mod secrets;
+mod scratchpad;
 
 use tauri::Emitter;
 use tauri::Manager;
@@ -84,6 +85,8 @@ pub fn run() {
             secrets::create_secret,
             secrets::update_secret,
             secrets::delete_secret,
+            scratchpad::scratchpad_write_cmd,
+            scratchpad::scratchpad_read_cmd,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
