@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { Send, Loader2, Globe, Monitor, Puzzle, X } from 'lucide-react';
+import { Send, Loader2, Globe, Monitor, Puzzle, X, CheckCircle, ChevronDown, ChevronUp, Database, ExternalLink } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
+import { open } from '@tauri-apps/plugin-shell';
 import { listen } from '@tauri-apps/api/event';
 import { useAppStore } from '../../store';
 import { generateId } from '../../lib/utils';
@@ -10,7 +11,7 @@ import { BrowserSelector } from './BrowserSelector';
 import { AgentStatusBar } from './AgentStatusBar';
 import { Button } from '../ui/Button';
 import { Toggle } from '../ui/Toggle';
-import type { AgentProgress, Message } from '../../types';
+import type { AgentProgress, Message, TaskCompletedPayload } from '../../types';
 
 export const ChatView: React.FC = () => {
   const {
@@ -38,6 +39,8 @@ export const ChatView: React.FC = () => {
   const [headless, setHeadless] = useState(false);
   const [showSkillPicker, setShowSkillPicker] = useState(false);
   const [selectedSkillIds, setSelectedSkillIds] = useState<string[]>([]);
+  const [taskCompleted, setTaskCompleted] = useState<TaskCompletedPayload | null>(null);
+  const [showScratchpad, setShowScratchpad] = useState(false);
   const agentProgressCount = useAppStore((s) => s.agentProgress.length);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -101,6 +104,25 @@ export const ChatView: React.FC = () => {
       unlisten.then((fn) => fn());
     };
   }, [activeConversationId, addAgentProgress, addMessage, setCurrentScreenshot]);
+
+  // Listen for task completion events
+  useEffect(() => {
+    const unlisten = listen<TaskCompletedPayload>('task_completed', (event) => {
+      setTaskCompleted(event.payload);
+      setShowScratchpad(false);
+    });
+    return () => {
+      unlisten.then((fn) => fn());
+    };
+  }, []);
+
+  // Clear task completion card when a new task starts
+  useEffect(() => {
+    if (isAgentRunning) {
+      setTaskCompleted(null);
+      setShowScratchpad(false);
+    }
+  }, [isAgentRunning]);
 
   const persistConversationAndMessage = useCallback(
     async (convId: string, convData: { id: string; title: string; created_at: string }, msg: Message) => {
@@ -359,6 +381,69 @@ export const ChatView: React.FC = () => {
           {activeConversation?.messages.map((message) => (
             <MessageBubble key={message.id} message={message} />
           ))}
+
+          {/* Task Completed result card */}
+          {taskCompleted && (
+            <div className="flex items-start gap-3">
+              <div className="w-8 h-8 rounded-xl bg-green-900/40 flex items-center justify-center shrink-0">
+                <CheckCircle className="w-4 h-4 text-green-400" />
+              </div>
+              <div className="max-w-[85%] space-y-2 flex-1">
+                <div className="text-xs font-semibold uppercase tracking-wide text-green-400">
+                  ✓ Task Completed
+                </div>
+                <div className="bg-green-950/30 border border-green-800/40 rounded-2xl rounded-tl-sm px-4 py-3 space-y-3">
+                  <p className="text-sm text-gray-300 leading-relaxed whitespace-pre-wrap">
+                    {taskCompleted.final_thought}
+                  </p>
+
+                  {taskCompleted.scratchpad.result_url && (
+                    <button
+                      onClick={() => open(taskCompleted.scratchpad.result_url!).catch(console.error)}
+                      className="inline-flex items-center gap-1.5 text-sm text-green-400 hover:text-green-300 transition-colors"
+                    >
+                      <ExternalLink className="w-3.5 h-3.5" />
+                      View Result →
+                    </button>
+                  )}
+
+                  {Object.keys(taskCompleted.scratchpad).length > 0 && (
+                    <div>
+                      <button
+                        onClick={() => setShowScratchpad((v) => !v)}
+                        className="flex items-center gap-1.5 text-xs text-[#606060] hover:text-[#a0a0a0] transition-colors"
+                      >
+                        <Database className="w-3 h-3" />
+                        <span>Task Memory</span>
+                        {showScratchpad ? (
+                          <ChevronUp className="w-3 h-3" />
+                        ) : (
+                          <ChevronDown className="w-3 h-3" />
+                        )}
+                      </button>
+                      {showScratchpad && (
+                        <div className="mt-2 space-y-1">
+                          {Object.entries(taskCompleted.scratchpad).map(([k, v]) => (
+                            <div key={k} className="flex gap-2 text-xs">
+                              <span className="text-[#606060] font-mono shrink-0">{k}:</span>
+                              <span className="text-[#a0a0a0] font-mono break-all">{v}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  <button
+                    onClick={() => useAppStore.getState().setActiveTab('logs')}
+                    className="text-xs text-[#606060] hover:text-[#a0a0a0] transition-colors underline"
+                  >
+                    View Details
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
 
           <div ref={messagesEndRef} />
         </div>

@@ -70,6 +70,16 @@ pub fn init(app_data_dir: PathBuf) -> SqlResult<()> {
             created_at       TEXT NOT NULL,
             updated_at       TEXT NOT NULL
         );
+
+        CREATE TABLE IF NOT EXISTS task_scratchpad (
+            id               TEXT PRIMARY KEY,
+            task_id          TEXT NOT NULL,
+            key              TEXT NOT NULL,
+            value            TEXT NOT NULL,
+            created_at       TEXT NOT NULL,
+            updated_at       TEXT NOT NULL,
+            UNIQUE(task_id, key)
+        );
         ",
     )?;
 

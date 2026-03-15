@@ -233,7 +233,7 @@ async fn execute_automation(app: tauri::AppHandle, automation: Automation, setti
     );
 
     let launch_result =
-        crate::browser::launch_browser(browser_path, true, session_id.clone()).await;
+        crate::browser::launch_browser(app.clone(), browser_path, true, session_id.clone()).await;
 
     if let Err(e) = launch_result {
         persist_automation_result(

@@ -166,3 +166,14 @@ export interface ApprovalRequest {
   reason: string;
   timestamp: string;
 }
+
+// ---------------------------------------------------------------------------
+// Task completion
+// ---------------------------------------------------------------------------
+export interface TaskCompletedPayload {
+  task_id: string;
+  session_id: string;
+  objective: string;
+  final_thought: string;
+  scratchpad: Record<string, string>;
+}
