@@ -209,13 +209,15 @@ pub async fn launch_browser(
         "--disable-translate".to_string(),
         "--metrics-recording-only".to_string(),
         "--safebrowsing-disable-auto-update".to_string(),
+        // Suppress automation detection in both visible and headless modes —
+        // GitHub, Perplexity and others check this flag regardless of headless.
+        "--disable-blink-features=AutomationControlled".to_string(),
         "about:blank".to_string(),
     ];
 
     if headless {
         args.push("--headless=new".to_string());
         args.push("--disable-gpu".to_string());
-        args.push("--disable-blink-features=AutomationControlled".to_string());
         args.push("--window-size=1280,800".to_string());
         // Derive a realistic user-agent from the browser executable name.
         let ua = derive_user_agent(&browser_path);

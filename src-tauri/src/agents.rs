@@ -757,8 +757,11 @@ pub async fn run_agent_task(
         tasks.remove(&task_id);
     }
 
-    // Clean up scratchpad entries for this task now that it has finished.
-    let _ = crate::scratchpad::scratchpad_clear(&task_id);
+    // Only clear the scratchpad on successful completion so that entries remain
+    // available for debugging when a task fails or is stopped mid-way.
+    if agent_task.status == "completed" {
+        let _ = crate::scratchpad::scratchpad_clear(&task_id);
+    }
 
     Ok(agent_task)
 }
